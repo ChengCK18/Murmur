@@ -1,0 +1,11 @@
+# Stream rates (messages per second) for SITL instances sending straight to the Murmur ingester.
+# Without a ground station SITL only sends HEARTBEAT, so Murmur sets the rates itself.
+# MAV1_ is the first MAVLink port (SERIAL0). Older docs call these SRx_*.
+MAV1_RAW_SENS 0
+MAV1_EXT_STAT 2
+MAV1_RC_CHAN 0
+MAV1_RAW_CTRL 0
+MAV1_POSITION 5
+MAV1_EXTRA1 5
+MAV1_EXTRA2 0
+MAV1_EXTRA3 1
