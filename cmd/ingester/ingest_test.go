@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"net/netip"
 	"regexp"
 	"strings"
@@ -9,6 +10,7 @@ import (
 	"time"
 
 	"github.com/ChengCK18/murmur/internal/linkstats"
+	"github.com/ChengCK18/murmur/internal/registry"
 	"github.com/ChengCK18/murmur/internal/tlog"
 )
 
@@ -125,5 +127,51 @@ func TestBootTextAndLinkLost(t *testing.T) {
 		"drone 1  sys 1  127.0.0.1:42318  STABILIZE disarmed  no position  batt ?  lost 0  link LOST")
 	if !strings.Contains(out.String(), "drone 1: link lost") {
 		t.Errorf("no link lost event in:\n%s", out.String())
+	}
+}
+
+// memStore is a registry.Store holding drones from an earlier ingester run.
+type memStore struct{ drones []registry.Drone }
+
+func (m *memStore) Load(context.Context) ([]registry.Drone, error) { return m.drones, nil }
+func (m *memStore) Create(_ context.Context, d registry.Drone) (registry.ID, error) {
+	return registry.ID(len(m.drones) + 1), nil
+}
+func (m *memStore) Move(context.Context, registry.Drone) error { return nil }
+
+func TestDronesFromStore(t *testing.T) {
+	// After an ingester restart the registry already knows drone 1, so its
+	// first frame here is Known, or Rebound if SITL restarted meanwhile.
+	recs, err := tlog.ReadFile("../../testdata/flight.tlog")
+	if err != nil {
+		t.Fatal(err)
+	}
+	earlier := recs[0].Time.Add(-time.Minute)
+	for _, tt := range []struct {
+		name  string
+		src   netip.AddrPort
+		event string
+	}{
+		{"same address", portA, "drone 1: known, sys 1 from 127.0.0.1:42318"},
+		{"new address", portB, "drone 1: rebound from 127.0.0.1:42318 to 127.0.0.1:52299 (restarted)"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			store := &memStore{drones: []registry.Drone{{ID: 1, Src: portA, SysID: 1, FirstSeen: earlier, LastHeartbeat: earlier}}}
+			var out bytes.Buffer
+			in, err := newIngester(linkstats.DefaultTimeout, &out)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if in.reg, err = registry.NewWithStore(context.Background(), linkstats.DefaultTimeout, store); err != nil {
+				t.Fatal(err)
+			}
+			for _, rec := range recs[:200] {
+				in.handlePacket(rec.Time, tt.src, rec.Frame)
+			}
+			report := in.tick(recs[199].Time)
+			if !strings.Contains(out.String(), tt.event) || !strings.Contains(report, "drone 1  sys 1  "+tt.src.String()) {
+				t.Errorf("events:\n%s\nreport:\n%s", out.String(), report)
+			}
+		})
 	}
 }

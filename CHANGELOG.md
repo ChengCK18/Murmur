@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `cmd/ingester`: receives MAVLink over UDP (`-listen`, default `:14560`), gives each drone a drone ID that survives a SITL restart, counts lost frames and heartbeat timeouts, and prints every drone's mode, position, battery and link state once a second.
 - The ingester publishes drone telemetry to the NATS JetStream stream `TELEMETRY` as JSON (`-nats`, default `nats://127.0.0.1:4222`; `-nats ""` for console only).
 - `deploy/docker-compose.yml` with NATS (JetStream), TimescaleDB and Redis.
+- The ingester keeps drone IDs in the `drones` table (`-db`), so they survive an ingester restart.
 - `cmd/consumer`: writes telemetry from JetStream to TimescaleDB (applying the schema migrations on start) and each drone's latest state to Redis (`drone:<tenant>:<drone>`), with nothing lost or duplicated across a restart.
 - SITL stream-rate parameters (`deploy/sitl/murmur-streams.parm`) so headless SITL sends position, attitude, system and battery status without a ground station.
 - `deploy/sitl/run-fleet.sh` to start several SITL drones sending straight to the ingester.

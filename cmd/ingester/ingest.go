@@ -104,11 +104,23 @@ func (in *ingester) update(r mavlink.Received) (registry.ID, bool) {
 	case registry.Unregistered:
 		in.unregistered++
 		return 0, false
+	}
+
+	// Console state is made on a drone's first frame, however the registry
+	// knows it: a drone loaded from the store is Known (or Rebound) without
+	// ever having been Registered by this ingester.
+	t, seen := in.drones[res.Drone.ID]
+	if !seen {
+		t = &telemetry{comps: map[uint8]bool{}, battery: -1}
+		in.drones[res.Drone.ID] = t
+		if res.Outcome == registry.Known {
+			in.eventf(r.ReceivedAt, "drone %d: known, sys %d from %v", res.Drone.ID, r.SysID, r.Src)
+		}
+	}
+	switch res.Outcome {
 	case registry.Registered:
-		in.drones[res.Drone.ID] = &telemetry{comps: map[uint8]bool{}, battery: -1}
 		in.eventf(r.ReceivedAt, "drone %d: new, sys %d from %v", res.Drone.ID, r.SysID, r.Src)
 	case registry.Rebound:
-		t := in.drones[res.Drone.ID]
 		for comp := range t.comps {
 			in.links.Forget(linkstats.Key{Src: res.OldSrc, SysID: r.SysID, CompID: comp})
 		}
@@ -116,7 +128,6 @@ func (in *ingester) update(r mavlink.Received) (registry.ID, bool) {
 		in.eventf(r.ReceivedAt, "drone %d: rebound from %v to %v (restarted)", res.Drone.ID, res.OldSrc, r.Src)
 	}
 
-	t := in.drones[res.Drone.ID]
 	t.src, t.sysID = res.Drone.Src, res.Drone.SysID
 	t.comps[r.CompID] = true
 
