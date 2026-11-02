@@ -1,6 +1,8 @@
 package registry
 
 import (
+	"context"
+	"errors"
 	"net/netip"
 	"testing"
 	"time"
@@ -172,4 +174,56 @@ func TestRestartRecording(t *testing.T) {
 	if len(drones) != 1 || drones[0].ID != 1 || drones[0].Src != portB {
 		t.Errorf("drones %+v, want drone 1 at %v", drones, portB)
 	}
+}
+
+// fakeStore is a Store in memory that can be made to fail.
+type fakeStore struct {
+	drones []Drone
+	fail   bool
+	moved  []Drone
+}
+
+func (f *fakeStore) Load(context.Context) ([]Drone, error) { return f.drones, nil }
+
+func (f *fakeStore) Create(_ context.Context, d Drone) (ID, error) {
+	if f.fail {
+		return 0, errors.New("database down")
+	}
+	d.ID = ID(100 + len(f.drones))
+	f.drones = append(f.drones, d)
+	return d.ID, nil
+}
+
+func (f *fakeStore) Move(_ context.Context, d Drone) error {
+	if f.fail {
+		return errors.New("database down")
+	}
+	f.moved = append(f.moved, d)
+	return nil
+}
+
+func TestStore(t *testing.T) {
+	store := &fakeStore{drones: []Drone{{ID: 7, Src: portA, SysID: 1, LastHeartbeat: t0}}}
+	g, err := NewWithStore(context.Background(), linkstats.DefaultTimeout, store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	run(t, g, []step{
+		{frame(portA, 1, 1, time.Second, sysStatus()), Known, 7}, // loaded: known straight away
+		{frame(portB, 2, 1, time.Second, heartbeat()), Registered, 101},
+	})
+
+	// The database is down: a new drone waits, a rebind still happens.
+	store.fail = true
+	run(t, g, []step{
+		{frame(other, 5, 1, 2*time.Second, heartbeat()), Unregistered, 0},
+		{frame(portB, 1, 1, 10*time.Second, heartbeat()), Rebound, 7},
+	})
+	if g.StoreErrors() != 2 {
+		t.Errorf("store errors %d, want 2", g.StoreErrors())
+	}
+
+	// Back up: the waiting drone registers on its next heartbeat.
+	store.fail = false
+	run(t, g, []step{{frame(other, 5, 1, 3*time.Second, heartbeat()), Registered, 102}})
 }
