@@ -13,6 +13,7 @@ import (
 	"github.com/ChengCK18/murmur/internal/linkstats"
 	"github.com/ChengCK18/murmur/internal/mavlink"
 	"github.com/ChengCK18/murmur/internal/registry"
+	"github.com/ChengCK18/murmur/internal/schema"
 )
 
 // telemetry is the latest state of one drone, for the console.
@@ -34,6 +35,8 @@ type ingester struct {
 	reg    *registry.Registry
 	links  *linkstats.Tracker
 	events io.Writer // one line per notable event
+	pub    publisher // nil: console only
+	tenant int64
 
 	mu           sync.Mutex
 	drones       map[registry.ID]*telemetry
@@ -71,8 +74,24 @@ func (in *ingester) handlePacket(at time.Time, src netip.AddrPort, data []byte) 
 	}
 }
 
-// handle processes one decoded frame.
+// handle processes one decoded frame and publishes it if it comes from a
+// drone. Publishing happens outside in.mu, so a slow NATS cannot hold up the
+// console report.
 func (in *ingester) handle(r mavlink.Received) {
+	id, ok := in.update(r)
+	if !ok || in.pub == nil || !published(r.Msg) {
+		return
+	}
+	t, err := schema.FromReceived(in.tenant, int64(id), r)
+	if err != nil {
+		return // not in the dialect: published() only lets known types through
+	}
+	in.pub.publish(t)
+}
+
+// update applies one frame to the registry, link stats and drone state, and
+// returns the drone it came from.
+func (in *ingester) update(r mavlink.Received) (registry.ID, bool) {
 	res := in.reg.Resolve(r)
 
 	in.mu.Lock()
@@ -81,10 +100,10 @@ func (in *ingester) handle(r mavlink.Received) {
 	switch res.Outcome {
 	case registry.Ignored:
 		in.ignored++
-		return
+		return 0, false
 	case registry.Unregistered:
 		in.unregistered++
-		return
+		return 0, false
 	case registry.Registered:
 		in.drones[res.Drone.ID] = &telemetry{comps: map[uint8]bool{}, battery: -1}
 		in.eventf(r.ReceivedAt, "drone %d: new, sys %d from %v", res.Drone.ID, r.SysID, r.Src)
@@ -119,6 +138,7 @@ func (in *ingester) handle(r mavlink.Received) {
 	case *ardupilotmega.MessageSysStatus:
 		t.battery = m.BatteryRemaining
 	}
+	return res.Drone.ID, true
 }
 
 // eventf writes one event line. The caller holds in.mu.
@@ -141,8 +161,13 @@ func (in *ingester) tick(now time.Time) string {
 	}
 
 	var b strings.Builder
-	fmt.Fprintf(&b, "--- %s  drones %d  packets %d  decode errors %d  ignored %d  unregistered %d\n",
+	fmt.Fprintf(&b, "--- %s  drones %d  packets %d  decode errors %d  ignored %d  unregistered %d",
 		now.Format("15:04:05"), len(in.drones), in.packets, in.decodeErrors, in.ignored, in.unregistered)
+	if in.pub != nil {
+		published, errs := in.pub.stats()
+		fmt.Fprintf(&b, "  published %d  publish errors %d", published, errs)
+	}
+	b.WriteByte('\n')
 	for _, d := range in.reg.Drones() {
 		b.WriteString(in.line(d.ID, in.drones[d.ID]))
 		b.WriteByte('\n')

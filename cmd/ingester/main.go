@@ -2,8 +2,8 @@
 // frame, tracks packet loss and link state, and prints the state of every
 // drone once a second.
 //
-// Phase 1 of the guide: console output only. Publishing to NATS comes in
-// Phase 2.
+// Telemetry from drones is published to the TELEMETRY JetStream stream as
+// schema.Telemetry JSON (guide step 2.4); -nats "" turns that off.
 package main
 
 import (
@@ -19,6 +19,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/ChengCK18/murmur/internal/bus"
 	"github.com/ChengCK18/murmur/internal/linkstats"
 )
 
@@ -26,16 +27,28 @@ func main() {
 	listen := flag.String("listen", ":14560", "UDP address to receive MAVLink on")
 	interval := flag.Duration("interval", time.Second, "how often to print drone state")
 	timeout := flag.Duration("timeout", linkstats.DefaultTimeout, "time without a heartbeat before a link counts as lost")
+	natsURL := flag.String("nats", "nats://127.0.0.1:4222", `NATS server to publish telemetry to; "" for console only`)
+	maxPending := flag.Int("max-pending", 4096, "most JetStream publishes awaiting acknowledgement")
+	tenant := flag.Int64("tenant", 1, "tenant ID stamped on every message")
 	flag.Parse()
 	log.SetFlags(0)
 
-	if err := run(*listen, *interval, *timeout); err != nil {
+	cfg := config{listen: *listen, interval: *interval, timeout: *timeout, natsURL: *natsURL, maxPending: *maxPending, tenant: *tenant}
+	if err := run(cfg); err != nil {
 		log.Fatalf("ingester: %v", err)
 	}
 }
 
-func run(listen string, interval, timeout time.Duration) error {
-	addr, err := net.ResolveUDPAddr("udp", listen)
+type config struct {
+	listen            string
+	interval, timeout time.Duration
+	natsURL           string
+	maxPending        int
+	tenant            int64
+}
+
+func run(cfg config) error {
+	addr, err := net.ResolveUDPAddr("udp", cfg.listen)
 	if err != nil {
 		return err
 	}
@@ -47,19 +60,32 @@ func run(listen string, interval, timeout time.Duration) error {
 	}
 	defer conn.Close()
 
-	in, err := newIngester(timeout, os.Stdout)
+	in, err := newIngester(cfg.timeout, os.Stdout)
 	if err != nil {
 		return err
 	}
+	in.tenant = cfg.tenant
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+
+	if cfg.natsURL != "" {
+		setup, cancel := context.WithTimeout(ctx, 10*time.Second)
+		p, err := newNATSPublisher(setup, cfg.natsURL, cfg.maxPending)
+		cancel()
+		if err != nil {
+			return err
+		}
+		defer p.close(5 * time.Second)
+		in.pub = p
+		fmt.Printf("publishing to %s, stream %s\n", cfg.natsURL, bus.TelemetryStream)
+	}
 	go func() {
 		<-ctx.Done()
 		conn.Close() // unblocks ReadFromUDPAddrPort
 	}()
 	go func() {
-		t := time.NewTicker(interval)
+		t := time.NewTicker(cfg.interval)
 		defer t.Stop()
 		for {
 			select {
