@@ -23,8 +23,22 @@ async function firstDrone(page: Page): Promise<number> {
   return Math.min(...ids);
 }
 
+test("the map draws its tiles", async ({ page }) => {
+  // Markers are HTML and appear even when MapLibre cannot render the map, so
+  // check the tiles themselves: fetched by MapLibre's worker, and no errors.
+  const errors: string[] = [];
+  page.on("console", (m) => m.type() === "error" && errors.push(m.text()));
+  page.on("pageerror", (e) => errors.push(e.message));
+  const tile = page.waitForResponse((r) => r.url().includes("tiles.openfreemap.org/planet/") && r.ok(), { timeout: 20_000 });
+  await page.goto("/");
+  await tile;
+  await page.waitForTimeout(1000);
+  expect(errors).toEqual([]);
+});
+
 test("the map shows the fleet moving", async ({ page }) => {
   const errors: string[] = [];
+  page.on("console", (m) => m.type() === "error" && errors.push(m.text()));
   page.on("pageerror", (e) => errors.push(e.message));
   await page.goto("/");
   await expect(page.locator(LIVE)).toHaveCount(DRONES, { timeout: 20_000 });

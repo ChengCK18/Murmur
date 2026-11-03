@@ -1,8 +1,15 @@
 import { useEffect, useRef } from "react";
-import { LngLatBounds, Map as MapLibreMap, Marker } from "maplibre-gl";
+import { LngLatBounds, Map as MapLibreMap, Marker, setWorkerUrl } from "maplibre-gl";
+import workerUrl from "maplibre-gl/dist/maplibre-gl-worker.mjs?url";
 import "maplibre-gl/dist/maplibre-gl.css";
 import type { DroneState } from "./types";
 import { altitudeLabel, batteryLabel } from "./drones";
+
+// MapLibre loads and decodes tiles in a web worker, which it looks for next
+// to its own file. Once bundled that file is our assets/index-*.js, where no
+// worker exists, so no tile is ever fetched and the map stays blank. Importing
+// the worker as a URL makes Vite emit it and tells MapLibre where it is.
+setWorkerUrl(workerUrl);
 
 // Free map tiles, no API key.
 const STYLE = "https://tiles.openfreemap.org/styles/liberty";
