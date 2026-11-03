@@ -3,7 +3,8 @@ import { expect, type Page, test } from "@playwright/test";
 
 const compose = process.env.MURMUR_COMPOSE ?? "docker compose -f ../deploy/docker-compose.yml";
 const DRONES = 10; // fakegen's -count in the Compose file
-// Live drones. Drones from earlier runs stay in Redis and on the map, greyed out.
+// Live drones. A drone whose link is lost stays on the map, greyed out, until
+// it has been silent for the gateway's -stale (10 minutes).
 const LIVE = ".drone:not(.lost)";
 
 // position returns where a drone's marker says it is.
@@ -44,6 +45,9 @@ test("the map shows the fleet moving", async ({ page }) => {
   await expect(page.locator(LIVE)).toHaveCount(DRONES, { timeout: 20_000 });
   await expect(page.locator(".list li:not(.lost)")).toHaveCount(DRONES);
   await expect(page.getByTestId("banner")).toBeHidden();
+  // No clutter from earlier runs: drones silent for 10 minutes are hidden.
+  // (Fails if other drones flew in the last 10 minutes, such as SITL.)
+  await expect(page.locator(".drone")).toHaveCount(DRONES);
 
   const id = await firstDrone(page);
   await expectMoving(page, id);

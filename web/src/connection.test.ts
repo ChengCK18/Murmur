@@ -43,6 +43,7 @@ describe("Connection", () => {
   let statuses: Status[];
   let snapshots: DroneState[][];
   let updates: DroneState[];
+  let removed: number[];
   let conn: Connection;
 
   beforeEach(() => {
@@ -51,10 +52,12 @@ describe("Connection", () => {
     statuses = [];
     snapshots = [];
     updates = [];
+    removed = [];
     const h: Handlers = {
       status: (s) => statuses.push(s),
       snapshot: (d) => snapshots.push(d),
       update: (d) => updates.push(d),
+      remove: (id) => removed.push(id),
     };
     conn = new Connection("ws://test/ws", h, () => {
       const s = new FakeSocket();
@@ -106,6 +109,22 @@ describe("Connection", () => {
     sockets[4].drop();
     vi.advanceTimersByTime(1000);
     expect(sockets.length).toBe(6);
+  });
+
+  it("removes and unsubscribes", () => {
+    conn.subscribe([1, 2]);
+    conn.start();
+    sockets[0].accept();
+    sockets[0].receive({ type: "remove", drone_id: 2 });
+    expect(removed).toEqual([2]);
+
+    conn.unsubscribe([2, 9]); // 9 was never subscribed
+    expect(sockets[0].sent.at(-1)).toEqual({ type: "unsubscribe", drones: [2] });
+    // After a reconnect only drone 1 is asked for.
+    sockets[0].drop();
+    vi.advanceTimersByTime(1000);
+    sockets[1].accept();
+    expect(sockets[1].sent).toEqual([{ type: "subscribe", drones: [1] }]);
   });
 
   it("stops for good", () => {

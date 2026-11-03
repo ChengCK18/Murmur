@@ -15,14 +15,24 @@ export class Drones {
     this.byId.set(s.drone_id, s);
   }
 
-  // merge keeps whichever state is newer, for the periodic REST list.
-  merge(states: DroneState[]): void {
+  remove(id: number): void {
+    this.byId.delete(id);
+  }
+
+  // merge takes the periodic REST list: it keeps whichever state is newer,
+  // and drops drones the list no longer has (the gateway hides drones silent
+  // for 10 minutes). It returns the dropped IDs.
+  merge(states: DroneState[]): number[] {
+    const listed = new Set(states.map((s) => s.drone_id));
+    const dropped = [...this.byId.keys()].filter((id) => !listed.has(id));
+    dropped.forEach((id) => this.byId.delete(id));
     for (const s of states) {
       const cur = this.byId.get(s.drone_id);
       if (!cur || Date.parse(s.last_seen) >= Date.parse(cur.last_seen) || s.link !== cur.link) {
         this.byId.set(s.drone_id, s);
       }
     }
+    return dropped;
   }
 
   list(): DroneState[] {

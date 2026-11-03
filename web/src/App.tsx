@@ -35,6 +35,11 @@ export function App() {
         store.current.update(d);
         render();
       },
+      remove: (id) => {
+        store.current.remove(id);
+        conn.unsubscribe([id]); // the next list refresh subscribes again if it returns
+        render();
+      },
       error: (msg) => console.warn("gateway:", msg),
     });
 
@@ -44,7 +49,7 @@ export function App() {
         const res = await fetch("/api/drones");
         if (!res.ok) return;
         const body = (await res.json()) as { drones: DroneState[] };
-        store.current.merge(body.drones);
+        conn.unsubscribe(store.current.merge(body.drones));
         conn.subscribe(body.drones.slice(0, MAX_SUBSCRIPTIONS).map((d) => d.drone_id));
         render();
       } catch {

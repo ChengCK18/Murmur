@@ -27,4 +27,5 @@ export interface DroneState {
 export type ServerMessage =
   | { type: "snapshot"; drones: DroneState[] }
   | { type: "update"; drone_id: number; state: DroneState }
+  | { type: "remove"; drone_id: number } // silent for the gateway's -stale (10 min)
   | { type: "error"; message: string };

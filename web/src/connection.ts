@@ -5,6 +5,7 @@ export type Status = "connecting" | "open" | "reconnecting";
 export interface Handlers {
   snapshot(drones: DroneState[]): void;
   update(state: DroneState): void;
+  remove(id: number): void;
   status(status: Status): void;
   error?(message: string): void;
 }
@@ -62,6 +63,14 @@ export class Connection {
     }
   }
 
+  // unsubscribe drops drones, freeing their place under the gateway's limit.
+  unsubscribe(ids: number[]): void {
+    const gone = ids.filter((id) => this.subs.delete(id));
+    if (gone.length > 0 && this.socket?.readyState === OPEN) {
+      this.socket.send(JSON.stringify({ type: "unsubscribe", drones: gone }));
+    }
+  }
+
   private connect(): void {
     const s = this.open(this.url);
     this.socket = s;
@@ -93,6 +102,9 @@ export class Connection {
         break;
       case "update":
         this.handlers.update(msg.state);
+        break;
+      case "remove":
+        this.handlers.remove(msg.drone_id);
         break;
       case "error":
         this.handlers.error?.(msg.message);
