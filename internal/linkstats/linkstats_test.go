@@ -216,3 +216,19 @@ func TestRestartCountedOnce(t *testing.T) {
 		t.Errorf("resets %d lost %d, want 1 0", s.Resets, s.Lost)
 	}
 }
+
+func TestTotals(t *testing.T) {
+	other := Key{Src: netip.MustParseAddrPort("127.0.0.1:52299"), SysID: 2, CompID: 1}
+	tr := New(DefaultTimeout)
+	tr.Observe(frame(drone, 0, 10, heartbeat()))
+	tr.Observe(frame(drone, 100*time.Millisecond, 14, sysStatus())) // 3 lost
+	tr.Observe(frame(other, 0, 0, heartbeat()))
+	tr.Observe(frame(other, 100*time.Millisecond, 200, sysStatus())) // a reset
+	tr.Tick(t0.Add(3500 * time.Millisecond))                         // both links lost
+	tr.Observe(frame(drone, 4*time.Second, 15, heartbeat()))         // drone's back
+	got := tr.Totals()
+	want := Totals{Frames: 5, Lost: 3, Resets: 2, LinkLosses: 2, LinkUp: 1, Senders: 2}
+	if got != want {
+		t.Errorf("totals %+v, want %+v", got, want)
+	}
+}

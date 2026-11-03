@@ -191,6 +191,31 @@ func (t *Tracker) Get(k Key) (Stats, bool) {
 	return s.Stats, true
 }
 
+// Totals is the sum over all senders: frames, lost and resets, with LinkUp
+// counting the senders whose link is up. Forgotten senders are not included.
+type Totals struct {
+	Frames, Lost, Resets, LinkLosses uint64
+	LinkUp, Senders                  int
+}
+
+// Totals sums the stats of every tracked sender.
+func (t *Tracker) Totals() Totals {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	var tot Totals
+	for _, s := range t.senders {
+		tot.Frames += s.Frames
+		tot.Lost += s.Lost
+		tot.Resets += s.Resets
+		tot.LinkLosses += s.LinkLosses
+		if s.LinkUp {
+			tot.LinkUp++
+		}
+		tot.Senders++
+	}
+	return tot
+}
+
 // Forget drops a sender, for example one whose drone now sends from a new
 // address after a restart.
 func (t *Tracker) Forget(k Key) {
