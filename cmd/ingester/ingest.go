@@ -41,6 +41,7 @@ type ingester struct {
 	mu           sync.Mutex
 	drones       map[registry.ID]*telemetry
 	packets      uint64
+	frames       uint64
 	decodeErrors uint64
 	ignored      uint64 // ground-station frames
 	unregistered uint64 // frames from senders not yet seen sending a heartbeat
@@ -65,6 +66,7 @@ func (in *ingester) handlePacket(at time.Time, src netip.AddrPort, data []byte) 
 	frames, err := in.dec.Decode(at, src, data)
 	in.mu.Lock()
 	in.packets++
+	in.frames += uint64(len(frames))
 	if err != nil {
 		in.decodeErrors++ // SITL's boot text lands here (finding 3)
 	}

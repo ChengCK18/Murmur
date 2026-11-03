@@ -13,6 +13,7 @@ import (
 	"github.com/ChengCK18/murmur/internal/bus/natstest"
 	"github.com/ChengCK18/murmur/internal/linkstats"
 	"github.com/ChengCK18/murmur/internal/mavlink"
+	"github.com/ChengCK18/murmur/internal/metrics"
 	"github.com/ChengCK18/murmur/internal/schema"
 	"github.com/ChengCK18/murmur/internal/tlog"
 )
@@ -146,5 +147,38 @@ func TestPublishToJetStream(t *testing.T) {
 	}
 	if msg.Subject != "telemetry.1" || msg.Header.Get(jetstream.MsgIDHeader) == "" {
 		t.Errorf("first message: subject %s header %v", msg.Subject, msg.Header)
+	}
+}
+
+func TestIngesterMetrics(t *testing.T) {
+	in, err := newIngester(linkstats.DefaultTimeout, io.Discard)
+	if err != nil {
+		t.Fatal(err)
+	}
+	in.pub = &fakePublisher{}
+	reg := metrics.NewRegistry()
+	in.registerMetrics(reg)
+	feed(t, in, "flight.tlog")
+	in.handlePacket(time.Now(), portA, []byte("not mavlink"))
+
+	snap, err := metrics.Snapshot(reg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, want := range map[string]float64{
+		"murmur_ingester_packets_total":             8181,
+		"murmur_ingester_frames_total":              8180,
+		"murmur_ingester_decode_errors_total":       1,
+		"murmur_ingester_frames_ignored_total":      168, // the recorder's ground-station frames
+		"murmur_ingester_frames_unregistered_total": 0,
+		"murmur_ingester_drones":                    1,
+		"murmur_ingester_frames_lost_total":         0,
+		"murmur_ingester_published_total":           2585,
+		"murmur_ingester_publish_errors_total":      0,
+		"murmur_ingester_links_up":                  1,
+	} {
+		if got, ok := snap[name]; !ok || got != want {
+			t.Errorf("%s = %v (present %v), want %v", name, got, ok, want)
+		}
 	}
 }

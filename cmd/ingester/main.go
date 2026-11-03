@@ -25,6 +25,7 @@ import (
 	"github.com/ChengCK18/murmur/internal/bus"
 	"github.com/ChengCK18/murmur/internal/db"
 	"github.com/ChengCK18/murmur/internal/linkstats"
+	"github.com/ChengCK18/murmur/internal/metrics"
 	"github.com/ChengCK18/murmur/internal/registry"
 )
 
@@ -36,10 +37,12 @@ func main() {
 	maxPending := flag.Int("max-pending", 4096, "most JetStream publishes awaiting acknowledgement")
 	tenant := flag.Int64("tenant", 1, "tenant ID stamped on every message")
 	dbURL := flag.String("db", "postgres://murmur:murmur@127.0.0.1:5432/murmur", `TimescaleDB holding drone IDs; "" to keep them in memory`)
+	metricsAddr := flag.String("metrics", ":9101", `address to serve Prometheus /metrics on; "" for none`)
 	flag.Parse()
 	log.SetFlags(0)
 
-	cfg := config{listen: *listen, interval: *interval, timeout: *timeout, natsURL: *natsURL, maxPending: *maxPending, tenant: *tenant, dbURL: *dbURL}
+	cfg := config{listen: *listen, interval: *interval, timeout: *timeout, natsURL: *natsURL, maxPending: *maxPending,
+		tenant: *tenant, dbURL: *dbURL, metricsAddr: *metricsAddr}
 	if err := run(cfg); err != nil {
 		log.Fatalf("ingester: %v", err)
 	}
@@ -52,6 +55,7 @@ type config struct {
 	maxPending        int
 	tenant            int64
 	dbURL             string
+	metricsAddr       string
 }
 
 func run(cfg config) error {
@@ -98,6 +102,14 @@ func run(cfg config) error {
 		defer p.close(5 * time.Second)
 		in.pub = p
 		fmt.Printf("publishing to %s, stream %s\n", cfg.natsURL, bus.TelemetryStream)
+	}
+	if cfg.metricsAddr != "" {
+		reg := metrics.NewRegistry()
+		in.registerMetrics(reg)
+		if err := metrics.Serve(ctx, cfg.metricsAddr, reg); err != nil {
+			return err
+		}
+		fmt.Printf("metrics on %s/metrics\n", cfg.metricsAddr)
 	}
 	go func() {
 		<-ctx.Done()
