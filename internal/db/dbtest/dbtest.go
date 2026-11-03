@@ -9,6 +9,7 @@ package dbtest
 import (
 	"context"
 	"fmt"
+	"net/url"
 	"os"
 	"sync/atomic"
 	"testing"
@@ -24,6 +25,14 @@ var counter atomic.Int64
 
 // New returns a pool connected to a new, empty database.
 func New(t testing.TB) *pgxpool.Pool {
+	t.Helper()
+	pool, _ := NewURL(t)
+	return pool
+}
+
+// NewURL is New that also returns the database's URL, for passing to a
+// service under test.
+func NewURL(t testing.TB) (*pgxpool.Pool, string) {
 	t.Helper()
 	adminURL := os.Getenv("MURMUR_TEST_DATABASE_URL")
 	if adminURL == "" {
@@ -66,5 +75,10 @@ func New(t testing.TB) *pgxpool.Pool {
 			t.Errorf("dbtest: drop %s: %v", name, err)
 		}
 	})
-	return pool
+	u, err := url.Parse(adminURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	u.Path = "/" + name
+	return pool, u.String()
 }
