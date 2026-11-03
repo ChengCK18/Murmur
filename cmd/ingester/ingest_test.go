@@ -17,6 +17,7 @@ import (
 var (
 	portA = netip.MustParseAddrPort("127.0.0.1:42318")
 	portB = netip.MustParseAddrPort("127.0.0.1:52299")
+	portC = netip.MustParseAddrPort("127.0.0.1:60001")
 )
 
 // replay feeds a recording to an ingester as UDP packets would arrive, ticking
@@ -156,7 +157,10 @@ func TestDronesFromStore(t *testing.T) {
 		{"new address", portB, "drone 1: rebound from 127.0.0.1:42318 to 127.0.0.1:52299 (restarted)"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			store := &memStore{drones: []registry.Drone{{ID: 1, Src: portA, SysID: 1, FirstSeen: earlier, LastHeartbeat: earlier}}}
+			store := &memStore{drones: []registry.Drone{
+				{ID: 1, Src: portA, SysID: 1, FirstSeen: earlier, LastHeartbeat: earlier},
+				{ID: 2, Src: portC, SysID: 9, FirstSeen: earlier, LastHeartbeat: earlier}, // stays silent
+			}}
 			var out bytes.Buffer
 			in, err := newIngester(linkstats.DefaultTimeout, &out)
 			if err != nil {
@@ -171,6 +175,9 @@ func TestDronesFromStore(t *testing.T) {
 			report := in.tick(recs[199].Time)
 			if !strings.Contains(out.String(), tt.event) || !strings.Contains(report, "drone 1  sys 1  "+tt.src.String()) {
 				t.Errorf("events:\n%s\nreport:\n%s", out.String(), report)
+			}
+			if strings.Contains(report, "drone 2") {
+				t.Errorf("silent stored drone in the report:\n%s", report)
 			}
 		})
 	}

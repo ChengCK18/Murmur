@@ -19,3 +19,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `deploy/sitl/run-manual.sh` to start one SITL drone with MAVProxy and QGroundControl for flying by hand, optionally recording to `testdata/`.
 - `deploy/sitl/record.py` to fly scripted idle, mission and restart sessions and record them as `.tlog` files.
 - Test recordings `testdata/idle.tlog`, `testdata/flight.tlog` and `testdata/restart.tlog`, and the `testdata/missions/square.txt` mission.
+
+### Fixed
+- The ingester no longer crashes on its first report when the `drones` table holds a drone that has not sent anything since the ingester started.

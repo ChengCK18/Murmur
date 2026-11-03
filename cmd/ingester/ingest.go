@@ -182,7 +182,11 @@ func (in *ingester) tick(now time.Time) string {
 	}
 	b.WriteByte('\n')
 	for _, d := range in.reg.Drones() {
-		b.WriteString(in.line(d.ID, in.drones[d.ID]))
+		t, seen := in.drones[d.ID]
+		if !seen {
+			continue // loaded from the store, but silent since this ingester started
+		}
+		b.WriteString(in.line(d.ID, t))
 		b.WriteByte('\n')
 	}
 	return b.String()
