@@ -4,6 +4,7 @@ go 1.25.1
 
 require (
 	github.com/bluenviron/gomavlib/v3 v3.3.5
+	github.com/coder/websocket v1.8.15
 	github.com/jackc/pgx/v5 v5.12.0
 	github.com/nats-io/nats-server/v2 v2.14.5
 	github.com/nats-io/nats.go v1.53.1

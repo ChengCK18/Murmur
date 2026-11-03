@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The consumer's `-redis` also takes a `redis://host:port/N` URL to choose a database.
 - `cmd/fakegen`: a fleet of fake drones (`-count`, `-target`, `-duration`, `-messages`), each with its own UDP port and sequence counter, flying circles on a grid with the SITL message rates.
 - `deploy/docker-compose.yml` with NATS (JetStream), TimescaleDB, Redis, the ingester, the consumer, 10 fake drones and Prometheus (`:9090`); `deploy/Dockerfile` builds any command's image.
+- `cmd/gateway` on `:8080`: a WebSocket (`/ws`) where browsers subscribe to up to 100 drones, get a snapshot and then each drone's latest state at most every 250 ms, with link-lost changes pushed; `GET /api/drones` and `GET /api/health`; metrics on `:9103`.
 - The ingester keeps drone IDs in the `drones` table (`-db`), so they survive an ingester restart.
 - `cmd/consumer`: writes telemetry from JetStream to TimescaleDB (applying the schema migrations on start) and each drone's latest state to Redis (`drone:<tenant>:<drone>`), with nothing lost or duplicated across a restart.
 - SITL stream-rate parameters (`deploy/sitl/murmur-streams.parm`) so headless SITL sends position, attitude, system and battery status without a ground station.
