@@ -3,7 +3,7 @@
 export GOTOOLCHAIN := local
 COMPOSE := docker compose -f deploy/docker-compose.yml
 
-.PHONY: test itest infra up down
+.PHONY: test itest web-test e2e infra up down
 
 test: ## unit tests; database and Redis tests skip if the infrastructure is not running
 	go test -count=1 ./...
@@ -11,10 +11,16 @@ test: ## unit tests; database and Redis tests skip if the infrastructure is not 
 itest: infra ## the Phase 2 integration test (about 3 minutes)
 	go test -tags integration -count=1 -v ./integration/
 
+web-test: ## the web app's type check and unit tests
+	cd web && npm ci --no-fund --no-audit && npx tsc --noEmit && npx vitest run
+
+e2e: ## browser tests against the running stack (make up first); restarts the gateway and fakegen
+	cd web && npx playwright test --reporter=line
+
 infra: ## NATS, TimescaleDB and Redis only
 	$(COMPOSE) up -d --wait nats timescaledb redis
 
-up: ## the whole stack, with 10 fake drones and Prometheus
+up: ## the whole stack: the map at http://localhost:8080, 10 fake drones, Prometheus
 	$(COMPOSE) up -d --build --wait
 
 down:

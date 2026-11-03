@@ -9,3 +9,6 @@ scrape_configs:
   - job_name: consumer
     static_configs:
       - targets: ["consumer:9102"]
+  - job_name: gateway
+    static_configs:
+      - targets: ["gateway:9103"]

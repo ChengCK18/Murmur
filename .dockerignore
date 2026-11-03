@@ -6,3 +6,7 @@ CLAUDE.md
 testdata/
 bin/
 /ingester
+web/node_modules/
+web/dist/
+web/test-results/
+web/playwright-report/

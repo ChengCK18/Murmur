@@ -1,7 +1,8 @@
 # Murmur (guide steps 2.1 and 2.9).
 #
 #   docker compose -f deploy/docker-compose.yml up -d --build
-#       everything: infrastructure, ingester, consumer, 10 fake drones, Prometheus
+#       everything: infrastructure, ingester, consumer, gateway with the map
+#       (http://localhost:8080), 10 fake drones, Prometheus
 #   docker compose -f deploy/docker-compose.yml up -d nats timescaledb redis
 #       infrastructure only, to run the Go services on the host instead
 #
@@ -105,6 +106,25 @@ services:
       ingester: { condition: service_healthy } # listening before the first heartbeat
     restart: unless-stopped
 
+  gateway:
+    build: { <<: *build, target: gateway, args: { CMD: gateway } }
+    image: murmur/gateway:dev
+    command:
+      - -nats=nats://nats:4222
+      - -redis=redis:6379
+      - -metrics=:9103
+      - -web=/web # the map at http://localhost:8080
+    ports:
+      - "127.0.0.1:8080:8080"
+      - "127.0.0.1:9103:9103"
+    depends_on:
+      nats: { condition: service_healthy }
+      redis: { condition: service_healthy }
+    restart: unless-stopped
+    healthcheck:
+      <<: *metrics-health
+      test: ["CMD", "wget", "-qO", "/dev/null", "http://localhost:8080/api/health"]
+
   prometheus:
     image: prom/prometheus:v3.15.1
     volumes:
@@ -112,7 +132,7 @@ services:
       - prometheus-data:/prometheus
     ports:
       - "127.0.0.1:9090:9090"
-    depends_on: [ingester, consumer]
+    depends_on: [ingester, consumer, gateway]
 
 volumes:
   nats-data:
