@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/ChengCK18/murmur/internal/mavlink"
 	"github.com/ChengCK18/murmur/internal/schema"
+	"github.com/ChengCK18/murmur/internal/state"
 )
 
 var t0 = time.Unix(1793516806, 0)
@@ -215,4 +217,68 @@ func TestLinkLostIsSent(t *testing.T) {
 	if len(links) != 2 || links[0] != "ok" || links[1] != "lost" {
 		t.Errorf("link states sent %v, want [ok lost]", links)
 	}
+}
+
+func TestStaleDronesRemoved(t *testing.T) {
+	h := newHub(1, 3*time.Second, 100, noRedis())
+	h.stale = time.Minute
+	now := time.Now()
+	h.apply(tel(t, 1, now.Add(-2*time.Minute), heartbeat()), now) // from a past run
+	h.apply(tel(t, 2, now, heartbeat()), now)
+
+	rec := &recorder{}
+	cl, _ := connect(t, h, 10*time.Millisecond, rec.send)
+	h.subscribe(context.Background(), cl, []int64{1, 2})
+	time.Sleep(30 * time.Millisecond)
+	if snap := rec.messages()[0]["drones"].([]any); len(snap) != 1 || snap[0].(map[string]any)["drone_id"].(float64) != 2 {
+		t.Fatalf("snapshot %v, want drone 2 only", snap)
+	}
+
+	// Drone 2 goes quiet: link lost after 3 s, removed after a minute, once.
+	h.checkLinks(now.Add(30 * time.Second))
+	time.Sleep(30 * time.Millisecond)
+	h.checkLinks(now.Add(2 * time.Minute))
+	time.Sleep(30 * time.Millisecond)
+	h.checkLinks(now.Add(3 * time.Minute))
+	time.Sleep(30 * time.Millisecond)
+	// Back again: shown again.
+	h.apply(tel(t, 2, now.Add(4*time.Minute), heartbeat()), now.Add(4*time.Minute))
+	time.Sleep(30 * time.Millisecond)
+
+	var got []string
+	for _, m := range rec.messages()[1:] {
+		s := m["type"].(string)
+		if st, ok := m["state"].(map[string]any); ok {
+			s += " " + st["link"].(string)
+		}
+		got = append(got, s)
+	}
+	if want := "[update lost remove update ok]"; fmt.Sprint(got) != want {
+		t.Errorf("messages %v, want %s", got, want)
+	}
+}
+
+func TestRemoveDoesNotOvertakeUpdate(t *testing.T) {
+	// An update and then a removal before the next send: the removal wins,
+	// in the same slot, and is the only message.
+	counts := &counters{}
+	rec := &recorder{}
+	cl := newClient(rec.send, time.Hour, counts)
+	cl.offer(stateOf(t, 5))
+	cl.offerRemove(5)
+	if err := cl.flush(context.Background(), true); err != nil {
+		t.Fatal(err)
+	}
+	if msgs := rec.messages(); len(msgs) != 1 || msgs[0]["type"] != "remove" || msgs[0]["drone_id"].(float64) != 5 {
+		t.Errorf("messages %v, want one removal of drone 5", msgs)
+	}
+}
+
+func stateOf(t *testing.T, id int64) *state.Drone {
+	t.Helper()
+	d := state.New(1, id)
+	if _, err := d.Apply(tel(t, id, t0, heartbeat())); err != nil {
+		t.Fatal(err)
+	}
+	return d
 }

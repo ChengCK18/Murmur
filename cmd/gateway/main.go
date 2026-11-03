@@ -29,7 +29,7 @@ type config struct {
 	listen, natsURL, redisURL, metricsAddr, web string
 	origins                                     []string
 	tenant                                      int64
-	throttle, timeout                           time.Duration
+	throttle, timeout, stale                    time.Duration
 	maxSubs                                     int
 }
 
@@ -45,6 +45,7 @@ func main() {
 	flag.Int64Var(&cfg.tenant, "tenant", 1, "tenant whose drones are served")
 	flag.DurationVar(&cfg.throttle, "throttle", 250*time.Millisecond, "send each browser each drone at most this often")
 	flag.DurationVar(&cfg.timeout, "timeout", linkstats.DefaultTimeout, "no heartbeat for this long: link lost")
+	flag.DurationVar(&cfg.stale, "stale", 10*time.Minute, "nothing heard for this long: hide the drone; 0 shows every drone ever seen")
 	flag.IntVar(&cfg.maxSubs, "max-subs", 100, "most drones one browser can subscribe to")
 	flag.Parse()
 	log.SetFlags(log.Ltime)
@@ -90,6 +91,7 @@ func run(ctx context.Context, cfg config, ready chan<- string) error {
 	}
 
 	h := newHub(cfg.tenant, cfg.timeout, cfg.maxSubs, rdb)
+	h.stale = cfg.stale
 	s := &server{hub: h, nc: nc, throttle: cfg.throttle, origins: cfg.origins, web: cfg.web}
 	if cfg.metricsAddr != "" {
 		reg := metrics.NewRegistry()

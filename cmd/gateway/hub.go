@@ -22,13 +22,15 @@ import (
 type hub struct {
 	tenant  int64
 	timeout time.Duration // no heartbeat for this long: link lost
+	stale   time.Duration // nothing heard for this long: hidden from browsers; 0 keeps every drone
 	maxSubs int           // per browser (plan open item 4)
 	rdb     *redis.Client
 
-	mu     sync.Mutex
-	drones map[int64]*state.Drone // merged from the feed and Redis
-	loaded map[int64]bool         // Redis hash merged in already
-	subs   map[int64]map[*client]struct{}
+	mu      sync.Mutex
+	drones  map[int64]*state.Drone // merged from the feed and Redis
+	loaded  map[int64]bool         // Redis hash merged in already
+	removed map[int64]bool         // stale, and subscribers told so
+	subs    map[int64]map[*client]struct{}
 
 	feedMessages atomic.Uint64
 	feedErrors   atomic.Uint64
@@ -37,9 +39,10 @@ type hub struct {
 func newHub(tenant int64, timeout time.Duration, maxSubs int, rdb *redis.Client) *hub {
 	return &hub{
 		tenant: tenant, timeout: timeout, maxSubs: maxSubs, rdb: rdb,
-		drones: map[int64]*state.Drone{},
-		loaded: map[int64]bool{},
-		subs:   map[int64]map[*client]struct{}{},
+		drones:  map[int64]*state.Drone{},
+		loaded:  map[int64]bool{},
+		removed: map[int64]bool{},
+		subs:    map[int64]map[*client]struct{}{},
 	}
 }
 
@@ -62,20 +65,38 @@ func (h *hub) apply(t schema.Telemetry, now time.Time) {
 		return
 	}
 	if d.UpdateLink(now, h.timeout) || changed {
+		delete(h.removed, t.DroneID) // heard from again
 		h.offer(d)
 	}
 }
 
-// checkLinks marks drones lost whose heartbeats stopped. A silent drone sends
-// nothing that would trigger an update, so this runs on a timer.
+// checkLinks marks drones lost whose heartbeats stopped, and removes drones
+// silent for longer than stale. A silent drone sends nothing that would
+// trigger either, so this runs on a timer.
 func (h *hub) checkLinks(now time.Time) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	for _, d := range h.drones {
+	for id, d := range h.drones {
+		if h.isStale(d, now) {
+			if !h.removed[id] {
+				h.removed[id] = true
+				for cl := range h.subs[id] {
+					cl.offerRemove(id)
+				}
+			}
+			continue
+		}
 		if d.UpdateLink(now, h.timeout) {
 			h.offer(d)
 		}
 	}
+}
+
+// isStale reports whether d has been silent for longer than h.stale. Old
+// drones stay in Redis for good; without this the map fills with drones from
+// past runs that will never fly again.
+func (h *hub) isStale(d *state.Drone, now time.Time) bool {
+	return h.stale > 0 && now.Sub(d.LastSeen) > h.stale
 }
 
 // offer gives every subscriber of d one shared copy. The caller holds h.mu.
@@ -122,6 +143,10 @@ func (h *hub) subscribe(ctx context.Context, cl *client, ids []int64) (refused i
 			h.subs[id][cl] = struct{}{}
 		}
 		if d, ok := h.drones[id]; ok {
+			if h.isStale(d, now) {
+				h.removed[id] = true // never shown, so nothing to remove later
+				continue
+			}
 			d.UpdateLink(now, h.timeout)
 			snapshot = append(snapshot, d.Clone())
 		}
@@ -205,7 +230,8 @@ func (h *hub) load(ctx context.Context, ids []int64) map[int64][]schema.Telemetr
 	return out
 }
 
-// all returns every drone with stored or live state, ordered by ID.
+// all returns every drone with stored or live state that is not stale,
+// ordered by ID.
 func (h *hub) all(ctx context.Context) ([]*state.Drone, error) {
 	var ids []int64
 	prefix := "drone:" + strconv.FormatInt(h.tenant, 10) + ":"
@@ -234,7 +260,11 @@ func (h *hub) all(ctx context.Context) ([]*state.Drone, error) {
 	h.mergeLoaded(fromRedis)
 	now := time.Now()
 	out := make([]*state.Drone, 0, len(h.drones))
-	for _, d := range h.drones {
+	for id, d := range h.drones {
+		if h.isStale(d, now) {
+			h.removed[id] = true
+			continue
+		}
 		d.UpdateLink(now, h.timeout)
 		out = append(out, d.Clone())
 	}
@@ -256,6 +286,10 @@ type (
 		Type    string       `json:"type"` // "update"
 		DroneID int64        `json:"drone_id"`
 		State   *state.Drone `json:"state"`
+	}
+	removeMsg struct {
+		Type    string `json:"type"` // "remove": stale, take it off the map
+		DroneID int64  `json:"drone_id"`
 	}
 	errorMsg struct {
 		Type    string `json:"type"` // "error"

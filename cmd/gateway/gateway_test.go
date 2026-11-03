@@ -196,3 +196,31 @@ func read(t *testing.T, ctx context.Context, conn *websocket.Conn) map[string]an
 	}
 	return m
 }
+
+func TestDroneListHidesStale(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	db := 1 + rand.IntN(15)
+	rdb := redis.NewClient(&redis.Options{Addr: "127.0.0.1:6379", DB: db})
+	if err := rdb.Ping(ctx).Err(); err != nil {
+		t.Skipf("no Redis at 127.0.0.1:6379: %v", err)
+	}
+	rdb.FlushDB(ctx)
+	defer func() { rdb.FlushDB(context.Background()); rdb.Close() }()
+	seedRedis(t, ctx, rdb) // drone 1, last heard on 2026-11-01
+
+	for _, tt := range []struct {
+		stale time.Duration
+		want  int
+	}{{0, 1}, {10 * time.Minute, 0}} {
+		h := newHub(1, 3*time.Second, 100, rdb)
+		h.stale = tt.stale
+		drones, err := h.all(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(drones) != tt.want {
+			t.Errorf("stale %v: %d drones listed, want %d", tt.stale, len(drones), tt.want)
+		}
+	}
+}

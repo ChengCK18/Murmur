@@ -30,8 +30,8 @@ type client struct {
 	subs map[int64]struct{} // guarded by hub.mu
 
 	mu      sync.Mutex
-	queue   [][]byte // snapshots and errors, sent in order before updates
-	pending map[int64]*state.Drone
+	queue   [][]byte               // snapshots and errors, sent in order before updates
+	pending map[int64]*state.Drone // nil: the drone was removed
 	wake    chan struct{}
 }
 
@@ -51,6 +51,14 @@ func (c *client) offer(d *state.Drone) {
 		c.counts.coalesced.Add(1)
 	}
 	c.pending[d.DroneID] = d
+	c.mu.Unlock()
+}
+
+// offerRemove replaces the drone's pending state with its removal, so a
+// removal never overtakes an update sent before it.
+func (c *client) offerRemove(id int64) {
+	c.mu.Lock()
+	c.pending[id] = nil
 	c.mu.Unlock()
 }
 
@@ -135,7 +143,11 @@ func (c *client) flush(ctx context.Context, updates bool) error {
 	}
 	slices.Sort(ids)
 	for _, id := range ids {
-		if err := c.write(ctx, encode(updateMsg{Type: "update", DroneID: id, State: pending[id]})); err != nil {
+		msg := any(updateMsg{Type: "update", DroneID: id, State: pending[id]})
+		if pending[id] == nil {
+			msg = removeMsg{Type: "remove", DroneID: id}
+		}
+		if err := c.write(ctx, encode(msg)); err != nil {
 			return err
 		}
 	}

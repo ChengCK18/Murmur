@@ -49,6 +49,7 @@ func (s *server) routes() http.Handler {
 //	browser → gateway  {"type":"subscribe","drones":[1,2,3]}  {"type":"unsubscribe","drones":[2]}
 //	gateway → browser  {"type":"snapshot","drones":[...]}      on each subscribe
 //	                   {"type":"update","drone_id":1,"state":{...}}
+//	                   {"type":"remove","drone_id":1}            silent for -stale
 //	                   {"type":"error","message":"..."}
 func (s *server) handleWS(w http.ResponseWriter, r *http.Request) {
 	conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{OriginPatterns: s.origins})
