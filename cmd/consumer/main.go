@@ -14,6 +14,7 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -29,7 +30,7 @@ import (
 func main() {
 	natsURL := flag.String("nats", "nats://127.0.0.1:4222", "NATS server")
 	dbURL := flag.String("db", "postgres://murmur:murmur@127.0.0.1:5432/murmur", "TimescaleDB")
-	redisAddr := flag.String("redis", "127.0.0.1:6379", "Redis address")
+	redisAddr := flag.String("redis", "127.0.0.1:6379", "Redis address, or a redis:// URL to choose a database")
 	durable := flag.String("durable", "db-writer", "durable consumer name")
 	batch := flag.Int("batch", 500, "most messages per batch")
 	wait := flag.Duration("wait", 100*time.Millisecond, "longest wait to fill a batch")
@@ -62,7 +63,13 @@ func run(ctx context.Context, natsURL, dbURL, redisAddr, durable string, batch i
 		log.Printf("applied migration %s", m)
 	}
 
-	rdb := redis.NewClient(&redis.Options{Addr: redisAddr})
+	opts := &redis.Options{Addr: redisAddr}
+	if strings.Contains(redisAddr, "://") {
+		if opts, err = redis.ParseURL(redisAddr); err != nil {
+			return fmt.Errorf("redis: %w", err)
+		}
+	}
+	rdb := redis.NewClient(opts)
 	defer rdb.Close()
 	if err := rdb.Ping(setup).Err(); err != nil {
 		return fmt.Errorf("redis %s: %w", redisAddr, err)
