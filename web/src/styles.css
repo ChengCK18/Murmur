@@ -1,0 +1,37 @@
+* { box-sizing: border-box; }
+html, body, #root { margin: 0; height: 100%; font: 14px/1.4 system-ui, sans-serif; color: #1d2733; }
+
+.app { display: grid; grid-template-columns: 380px 1fr; height: 100%; }
+.map { height: 100%; }
+
+.banner {
+  position: fixed; top: 12px; left: 50%; transform: translateX(-50%); z-index: 10;
+  background: #b42318; color: #fff; padding: 8px 16px; border-radius: 6px;
+  box-shadow: 0 2px 8px rgb(0 0 0 / 0.25);
+}
+
+.list { overflow-y: auto; border-right: 1px solid #d0d7de; background: #f8fafc; }
+.list h1 { font-size: 15px; margin: 0; padding: 12px 14px; border-bottom: 1px solid #d0d7de; }
+.list .empty { padding: 12px 14px; color: #57606a; }
+.list ul { list-style: none; margin: 0; padding: 0; }
+.list li {
+  display: grid; grid-template-columns: 32px 1fr 56px 40px 62px; gap: 6px; align-items: center;
+  padding: 7px 14px; border-bottom: 1px solid #eaeef2; cursor: pointer;
+}
+.list li:hover { background: #eef4fb; }
+.list li.selected { background: #dbeafe; }
+.list li.lost { color: #8c959f; }
+.list .id { font-weight: 600; }
+.list .num { text-align: right; font-variant-numeric: tabular-nums; }
+.list .mode { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.list .link { font-size: 12px; white-space: nowrap; }
+
+.drone { display: flex; align-items: center; gap: 4px; cursor: pointer; }
+.drone .arrow { fill: #1f6feb; stroke: #fff; stroke-width: 1.5; transition: transform 0.2s linear; }
+.drone .label {
+  background: rgb(255 255 255 / 0.9); padding: 1px 5px; border-radius: 4px;
+  font-size: 11px; white-space: nowrap; font-variant-numeric: tabular-nums;
+}
+.drone.selected .arrow { fill: #d97706; }
+.drone.lost { opacity: 0.55; }
+.drone.lost .arrow { fill: #8c959f; }

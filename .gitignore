@@ -5,3 +5,9 @@ local/
 # Go build output
 /ingester
 bin/
+
+# Web app
+web/node_modules/
+web/dist/
+web/test-results/
+web/playwright-report/
