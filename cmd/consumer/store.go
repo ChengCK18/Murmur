@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"fmt"
-	"math"
 	"strconv"
 
 	"github.com/bluenviron/gomavlib/v3/pkg/dialects/ardupilotmega"
@@ -12,6 +11,7 @@ import (
 	"github.com/redis/go-redis/v9"
 
 	"github.com/ChengCK18/murmur/internal/schema"
+	"github.com/ChengCK18/murmur/internal/state"
 )
 
 // row is one telemetry row: the message plus the typed columns its type fills.
@@ -32,12 +32,11 @@ func newRow(t schema.Telemetry) (row, error) {
 	}
 	switch m := msg.(type) {
 	case *ardupilotmega.MessageGlobalPositionInt:
-		lat, lon := float64(m.Lat)/1e7, float64(m.Lon)/1e7
-		alt, rel := float32(m.Alt)/1000, float32(m.RelativeAlt)/1000
-		speed := float32(math.Hypot(float64(m.Vx), float64(m.Vy)) / 100) // cm/s north and east
-		r.lat, r.lon, r.alt, r.rel, r.speed = &lat, &lon, &alt, &rel, &speed
-		if m.Hdg != math.MaxUint16 { // UINT16_MAX: unknown
-			hdg := float32(m.Hdg) / 100
+		p := state.PositionOf(m)
+		alt, rel, speed := float32(p.AltMSL), float32(p.RelAlt), float32(p.Speed)
+		r.lat, r.lon, r.alt, r.rel, r.speed = &p.Lat, &p.Lon, &alt, &rel, &speed
+		if p.HeadingDeg != nil {
+			hdg := float32(*p.HeadingDeg)
 			r.hdg = &hdg
 		}
 	case *ardupilotmega.MessageSysStatus:
@@ -49,11 +48,12 @@ func newRow(t schema.Telemetry) (row, error) {
 }
 
 func batteryPct(v int8) *int16 {
-	if v < 0 { // -1: unknown
+	p := state.BatteryPercent(v)
+	if p == nil {
 		return nil
 	}
-	p := int16(v)
-	return &p
+	b := int16(*p)
+	return &b
 }
 
 const insertTelemetry = `INSERT INTO telemetry (
