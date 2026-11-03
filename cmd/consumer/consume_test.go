@@ -20,6 +20,7 @@ import (
 	"github.com/ChengCK18/murmur/internal/db"
 	"github.com/ChengCK18/murmur/internal/db/dbtest"
 	"github.com/ChengCK18/murmur/internal/mavlink"
+	"github.com/ChengCK18/murmur/internal/metrics"
 	"github.com/ChengCK18/murmur/internal/schema"
 	"github.com/ChengCK18/murmur/internal/tlog"
 )
@@ -293,4 +294,49 @@ func TestOlderMessageDoesNotOverwrite(t *testing.T) {
 	if !got.ReceivedAt.Equal(newer.ReceivedAt) || h["last_seen:us"] != itoa(newer.ReceivedAt.UnixMicro()) {
 		t.Errorf("Redis holds %v (last seen %s), want the newer %v", got.ReceivedAt, h["last_seen:us"], newer.ReceivedAt)
 	}
+}
+
+func TestConsumerMetrics(t *testing.T) {
+	e := newEnv(t)
+	sent := e.publishFlight(t)
+	c := e.newConsumer(t, 500)
+	reg := metrics.NewRegistry()
+	c.obs = newObservers(reg, c)
+	e.runUntil(t, c, func() bool { return e.drained(c) })
+	c.obs.trackLag(canceled(), c, time.Hour) // one refresh, then return
+
+	snap, err := metrics.Snapshot(reg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	n := float64(len(sent))
+	for name, want := range map[string]float64{
+		"murmur_consumer_fetched_total":                   n,
+		"murmur_consumer_inserted_total":                  n,
+		"murmur_consumer_duplicates_total":                0,
+		"murmur_consumer_failed_batches_total":            0,
+		"murmur_consumer_lag":                             0,
+		"murmur_consumer_batch_size_sum":                  n, // every message in exactly one batch
+		"murmur_consumer_receive_to_commit_seconds_count": n, // one latency per message
+	} {
+		if got := snap[name]; got != want {
+			t.Errorf("%s = %v, want %v", name, got, want)
+		}
+	}
+	// The recording is from 2026-11-01, so every latency is at least the age
+	// of the recording: proof received_at, not the fetch time, is measured.
+	age := time.Since(sent[len(sent)-1].ReceivedAt).Seconds()
+	if mean := snap["murmur_consumer_receive_to_commit_seconds_sum"] / n; mean < age {
+		t.Errorf("mean latency %.0f s, less than the recording's age %.0f s", mean, age)
+	}
+	if snap["murmur_consumer_batch_write_seconds_count"] != snap["murmur_consumer_batch_size_count"] {
+		t.Errorf("batch write and size counts differ: %v", snap)
+	}
+}
+
+// canceled returns a context that is already done.
+func canceled() context.Context {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	return ctx
 }

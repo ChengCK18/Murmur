@@ -23,6 +23,7 @@ import (
 
 	"github.com/ChengCK18/murmur/internal/bus"
 	"github.com/ChengCK18/murmur/internal/db"
+	"github.com/ChengCK18/murmur/internal/metrics"
 )
 
 func main() {
@@ -33,17 +34,18 @@ func main() {
 	batch := flag.Int("batch", 500, "most messages per batch")
 	wait := flag.Duration("wait", 100*time.Millisecond, "longest wait to fill a batch")
 	interval := flag.Duration("interval", 5*time.Second, "how often to print progress")
+	metricsAddr := flag.String("metrics", ":9102", `address to serve Prometheus /metrics on; "" for none`)
 	flag.Parse()
 	log.SetFlags(log.Ltime)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	if err := run(ctx, *natsURL, *dbURL, *redisAddr, *durable, *batch, *wait, *interval); err != nil {
+	if err := run(ctx, *natsURL, *dbURL, *redisAddr, *durable, *batch, *wait, *interval, *metricsAddr); err != nil {
 		log.Fatalf("consumer: %v", err)
 	}
 }
 
-func run(ctx context.Context, natsURL, dbURL, redisAddr, durable string, batch int, wait, interval time.Duration) error {
+func run(ctx context.Context, natsURL, dbURL, redisAddr, durable string, batch int, wait, interval time.Duration, metricsAddr string) error {
 	setup, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
@@ -84,6 +86,15 @@ func run(ctx context.Context, natsURL, dbURL, redisAddr, durable string, batch i
 	}
 
 	c := &consumer{cons: cons, pool: pool, rdb: rdb, batch: batch, wait: wait}
+	if metricsAddr != "" {
+		reg := metrics.NewRegistry()
+		c.obs = newObservers(reg, c)
+		go c.obs.trackLag(ctx, c, time.Second)
+		if err := metrics.Serve(ctx, metricsAddr, reg); err != nil {
+			return err
+		}
+		log.Printf("metrics on %s/metrics", metricsAddr)
+	}
 	go report(ctx, c, interval)
 	log.Printf("consuming %s as %q, batches of up to %d or %v", bus.TelemetryStream, durable, batch, wait)
 	c.run(ctx)

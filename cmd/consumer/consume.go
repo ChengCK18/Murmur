@@ -44,6 +44,15 @@ type consumer struct {
 	batch int
 	wait  time.Duration
 	stats stats
+	obs   *observers // nil: no metrics
+}
+
+// batch is the valid messages of one fetch, in three views: database rows,
+// decoded telemetry, and the JSON as received (stored in Redis).
+type batch struct {
+	rows    []row
+	tels    []schema.Telemetry
+	encoded [][]byte
 }
 
 // run fetches and writes batches until ctx is cancelled.
@@ -78,9 +87,7 @@ func (c *consumer) handle(ctx context.Context, msgs []jetstream.Msg) {
 	c.stats.fetched.Add(uint64(len(msgs)))
 
 	var good []jetstream.Msg
-	var tels []schema.Telemetry
-	var encoded [][]byte
-	var rows []row
+	var b batch
 	for _, m := range msgs {
 		var t schema.Telemetry
 		err := json.Unmarshal(m.Data(), &t)
@@ -95,9 +102,9 @@ func (c *consumer) handle(ctx context.Context, msgs []jetstream.Msg) {
 			continue
 		}
 		good = append(good, m)
-		tels = append(tels, t)
-		encoded = append(encoded, m.Data())
-		rows = append(rows, r)
+		b.tels = append(b.tels, t)
+		b.encoded = append(b.encoded, m.Data())
+		b.rows = append(b.rows, r)
 	}
 	if len(good) == 0 {
 		return
@@ -107,7 +114,8 @@ func (c *consumer) handle(ctx context.Context, msgs []jetstream.Msg) {
 	// stopping the consumer does not throw away work in hand.
 	wctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
 	defer cancel()
-	err := c.write(wctx, rows, tels, encoded)
+	start := time.Now()
+	commit, err := c.write(wctx, b)
 	if err != nil {
 		c.stats.failed.Add(1)
 		if ctx.Err() == nil {
@@ -118,19 +126,22 @@ func (c *consumer) handle(ctx context.Context, msgs []jetstream.Msg) {
 		}
 		return
 	}
+	c.obs.observe(b, time.Since(start), commit)
 	for _, m := range good {
 		m.Ack() //nolint:errcheck // a lost ack means a redelivery, which the database drops
 	}
 }
 
-func (c *consumer) write(ctx context.Context, rows []row, tels []schema.Telemetry, encoded [][]byte) error {
-	inserted, err := writeDB(ctx, c.pool, rows)
+// write stores a batch and returns when the database committed it.
+func (c *consumer) write(ctx context.Context, b batch) (time.Time, error) {
+	inserted, err := writeDB(ctx, c.pool, b.rows)
 	if err != nil {
-		return err
+		return time.Time{}, err
 	}
+	commit := time.Now()
 	c.stats.inserted.Add(uint64(inserted))
-	c.stats.duplicates.Add(uint64(int64(len(rows)) - inserted))
-	return writeState(ctx, c.rdb, tels, encoded)
+	c.stats.duplicates.Add(uint64(int64(len(b.rows)) - inserted))
+	return commit, writeState(ctx, c.rdb, b.tels, b.encoded)
 }
 
 func sleep(ctx context.Context, d time.Duration) {

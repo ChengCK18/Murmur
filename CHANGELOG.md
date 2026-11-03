@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - `cmd/ingester`: receives MAVLink over UDP (`-listen`, default `:14560`), gives each drone a drone ID that survives a SITL restart, counts lost frames and heartbeat timeouts, and prints every drone's mode, position, battery and link state once a second.
 - The ingester publishes drone telemetry to the NATS JetStream stream `TELEMETRY` as JSON (`-nats`, default `nats://127.0.0.1:4222`; `-nats ""` for console only).
+- Prometheus metrics on `/metrics`: the ingester on `:9101` (packets, decode errors, lost frames, link losses, published and publish errors) and the consumer on `:9102` (inserted, duplicates, lag, batch size and write time, receive-to-commit latency); `-metrics ""` turns them off.
 - `deploy/docker-compose.yml` with NATS (JetStream), TimescaleDB and Redis.
 - The ingester keeps drone IDs in the `drones` table (`-db`), so they survive an ingester restart.
 - `cmd/consumer`: writes telemetry from JetStream to TimescaleDB (applying the schema migrations on start) and each drone's latest state to Redis (`drone:<tenant>:<drone>`), with nothing lost or duplicated across a restart.
