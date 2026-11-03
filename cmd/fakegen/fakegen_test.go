@@ -15,48 +15,137 @@ import (
 )
 
 func TestRates(t *testing.T) {
-	// One second is ten ticks.
-	p := newPath(0, 1)
-	counts := map[string]int{}
-	for n := range 10 {
-		for _, m := range p.messages(n) {
-			counts[schema.MessageName(m)]++
+	// One second is ten ticks: ten messages, whatever the route.
+	for i := range 3 {
+		p := newPath(i, 3)
+		counts := map[string]int{}
+		total := 0
+		for n := range 10 {
+			for _, m := range p.messages(n) {
+				counts[schema.MessageName(m)]++
+				total++
+			}
 		}
-	}
-	want := map[string]int{"HEARTBEAT": 1, "GLOBAL_POSITION_INT": 5, "ATTITUDE": 5, "SYS_STATUS": 2, "BATTERY_STATUS": 1}
-	for k, n := range want {
-		if counts[k] != n {
-			t.Errorf("%s: %d per second, want %d", k, counts[k], n)
+		want := map[string]int{"HEARTBEAT": 1, "GLOBAL_POSITION_INT": 5, "ATTITUDE": 2, "SYS_STATUS": 1, "BATTERY_STATUS": 1}
+		for k, n := range want {
+			if counts[k] != n {
+				t.Errorf("drone %d %s: %d per second, want %d", i, k, counts[k], n)
+			}
 		}
-	}
-	if first := p.messages(0)[0]; !mavlink.IsHeartbeat(first) {
-		t.Errorf("first message is %T, want HEARTBEAT", first)
+		if total != 10 {
+			t.Errorf("drone %d: %d messages per second, want 10", i, total)
+		}
+		if first := p.messages(0)[0]; !mavlink.IsHeartbeat(first) {
+			t.Errorf("drone %d: first message is %T, want HEARTBEAT", i, first)
+		}
 	}
 }
 
-func TestPath(t *testing.T) {
-	p := newPath(7, 10)
-	cosLat := math.Cos(p.lat * math.Pi / 180)
-	for _, sec := range []float64{0, 3.3, 15, 31, 59} {
-		s := p.at(time.Duration(sec * float64(time.Second)))
-		north := (s.lat - p.lat) * metresPerDegLat
-		east := (s.lng - p.lng) * metresPerDegLat * cosLat
-		if r := math.Hypot(north, east); math.Abs(r-p.radius) > 0.01 {
-			t.Errorf("t=%vs: %.2f m from the centre, want %.0f", sec, r, p.radius)
+func TestRoutes(t *testing.T) {
+	// Every route keeps a steady speed, moves without jumps, stays inside
+	// its grid cell and heads the way it moves.
+	const step = 100 * time.Millisecond
+	kinds := map[string]bool{}
+	for i := range 30 {
+		p := newPath(i, 30)
+		switch r := p.route.(type) {
+		case circle:
+			kinds["circle"] = true
+		case loop:
+			kinds[map[bool]string{true: "line", false: "lawnmower"}[len(r.points) == 2]] = true
 		}
-		// Velocity is along the circle, at a steady speed.
-		if dot := north*s.vn + east*s.ve; math.Abs(dot) > 1e-6 {
-			t.Errorf("t=%vs: velocity not tangent (dot %v)", sec, dot)
+		cosLat := math.Cos(p.lat * math.Pi / 180)
+		first := p.route.at(0)
+		speed := math.Hypot(first.vn, first.ve)
+		prev := first
+		for n := 1; n <= 3000; n++ { // five minutes
+			l := p.route.at(time.Duration(n) * step)
+			if v := math.Hypot(l.vn, l.ve); math.Abs(v-speed) > 1e-9 {
+				t.Fatalf("drone %d t=%v: speed %.3f, was %.3f", i, time.Duration(n)*step, v, speed)
+			}
+			if d := math.Hypot(l.north-prev.north, l.east-prev.east); d > speed*step.Seconds()+1e-6 {
+				t.Fatalf("drone %d t=%v: jumped %.2f m", i, time.Duration(n)*step, d)
+			}
+			if math.Abs(l.north) > gridSpacing/2 || math.Abs(l.east) > gridSpacing/2 {
+				t.Fatalf("drone %d t=%v: left its cell at %.0f m N, %.0f m E", i, time.Duration(n)*step, l.north, l.east)
+			}
+			prev = l
 		}
-		if v := math.Hypot(s.vn, s.ve); math.Abs(v-2*math.Pi*p.radius/60) > 1e-9 {
-			t.Errorf("t=%vs: speed %.3f", sec, v)
-		}
+		s := p.at(42 * time.Second)
 		if want := math.Mod(math.Atan2(s.ve, s.vn)*180/math.Pi+360, 360); math.Abs(s.headingDeg-want) > 1e-9 {
-			t.Errorf("t=%vs: heading %.2f, want %.2f", sec, s.headingDeg, want)
+			t.Errorf("drone %d: heading %.2f, want %.2f", i, s.headingDeg, want)
+		}
+		l := p.route.at(42 * time.Second)
+		if north := (s.lat - p.lat) * metresPerDegLat; math.Abs(north-l.north) > 1e-6 {
+			t.Errorf("drone %d: %.3f m north, route says %.3f", i, north, l.north)
+		}
+		if east := (s.lng - p.lng) * metresPerDegLat * cosLat; math.Abs(east-l.east) > 1e-6 {
+			t.Errorf("drone %d: %.3f m east, route says %.3f", i, east, l.east)
 		}
 	}
+	if len(kinds) != 3 {
+		t.Errorf("routes flown: %v, want circle, line and lawnmower", kinds)
+	}
 	if a, b := newPath(0, 10), newPath(1, 10); a.lat == b.lat && a.lng == b.lng {
-		t.Error("two drones share a centre")
+		t.Error("two drones share a cell")
+	}
+}
+
+func TestCircle(t *testing.T) {
+	c := circle{radius: 70, period: time.Minute, phase: 1}
+	for _, sec := range []float64{0, 3.3, 15, 31, 59} {
+		l := c.at(time.Duration(sec * float64(time.Second)))
+		if r := math.Hypot(l.north, l.east); math.Abs(r-70) > 1e-9 {
+			t.Errorf("t=%vs: %.2f m from the centre, want 70", sec, r)
+		}
+		if dot := l.north*l.vn + l.east*l.ve; math.Abs(dot) > 1e-6 {
+			t.Errorf("t=%vs: velocity not tangent (dot %v)", sec, dot)
+		}
+	}
+	// Anticlockwise: turning left, so banked left.
+	s := path{route: c}.at(0)
+	if s.yawRate >= 0 || s.bank >= 0 {
+		t.Errorf("yaw rate %v, bank %v: want both negative (left turn)", s.yawRate, s.bank)
+	}
+}
+
+func TestLawnmower(t *testing.T) {
+	// Six rows 30 m apart: every row is flown in full, alternating direction,
+	// and one lap returns to the start.
+	l := newLawnmower(200, 6, 30, 8, 0)
+	lap := time.Duration(l.length() / 8 * float64(time.Second))
+	if want := 6*200 + 5*30 + 150.0; math.Abs(l.length()-want) > 1e-9 {
+		t.Errorf("lap %.0f m, want %.0f", l.length(), want)
+	}
+	start, end := l.at(0), l.at(lap)
+	if math.Hypot(end.north-start.north, end.east-start.east) > 1e-6 {
+		t.Errorf("a lap ends at %+v, started at %+v", end, start)
+	}
+	rows := map[float64]float64{} // row north → direction east
+	for d := 0.0; d < l.length(); d += 1 {
+		p := l.at(time.Duration(d / 8 * float64(time.Second)))
+		if p.vn == 0 {
+			rows[math.Round(p.north)] = math.Copysign(1, p.ve)
+		}
+	}
+	if len(rows) != 6 {
+		t.Fatalf("rows flown %v, want 6", rows)
+	}
+	for _, n := range []float64{-75, -45, -15, 15, 45, 75} {
+		if want := map[bool]float64{true: 1, false: -1}[int((n+75)/30)%2 == 0]; rows[n] != want {
+			t.Errorf("row %.0f m: direction %v, want %v", n, rows[n], want)
+		}
+	}
+}
+
+func TestLine(t *testing.T) {
+	// Back and forth: the far end is reached after one length.
+	l := newLine(200, math.Pi/2, 10, 0) // west to east
+	if a, b := l.at(0), l.at(20*time.Second); a.east != -100 || math.Abs(b.east-100) > 1e-9 || a.ve != 10 {
+		t.Errorf("start %+v, after 20 s %+v", a, b)
+	}
+	if back := l.at(25 * time.Second); back.ve != -10 || math.Abs(back.east-50) > 1e-9 {
+		t.Errorf("coming back %+v", back)
 	}
 }
 
