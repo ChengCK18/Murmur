@@ -183,18 +183,32 @@ func (d *Drone) Clone() *Drone {
 // (drone:<tenant_id>:<drone_id>), which the consumer fills with the latest
 // message of each type as schema.Telemetry JSON.
 func FromRedis(tenantID, droneID int64, hash map[string]string) (*Drone, error) {
+	msgs, err := ParseRedis(hash)
+	if err != nil {
+		return nil, fmt.Errorf("state: drone %d: %w", droneID, err)
+	}
 	d := New(tenantID, droneID)
-	for field, value := range hash {
-		if strings.Contains(field, ":") || field == "last_seen" {
-			continue // bookkeeping: <MSG>:us, last_seen, last_seen:us
-		}
-		var t schema.Telemetry
-		if err := json.Unmarshal([]byte(value), &t); err != nil {
-			return nil, fmt.Errorf("state: drone %d field %s: %w", droneID, field, err)
-		}
+	for _, t := range msgs {
 		if _, err := d.Apply(t); err != nil {
-			return nil, fmt.Errorf("state: drone %d field %s: %w", droneID, field, err)
+			return nil, fmt.Errorf("state: drone %d %s: %w", droneID, t.Msg, err)
 		}
 	}
 	return d, nil
+}
+
+// ParseRedis returns the messages in a drone's Redis hash, skipping the
+// bookkeeping fields (<MSG>:us, last_seen, last_seen:us).
+func ParseRedis(hash map[string]string) ([]schema.Telemetry, error) {
+	var out []schema.Telemetry
+	for field, value := range hash {
+		if strings.Contains(field, ":") || field == "last_seen" {
+			continue
+		}
+		var t schema.Telemetry
+		if err := json.Unmarshal([]byte(value), &t); err != nil {
+			return nil, fmt.Errorf("field %s: %w", field, err)
+		}
+		out = append(out, t)
+	}
+	return out, nil
 }
