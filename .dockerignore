@@ -1,0 +1,8 @@
+# Keep private notes, recordings and build output out of images.
+.git
+local/
+CLAUDE.md
+.sitl/
+testdata/
+bin/
+/ingester

@@ -1,6 +1,14 @@
-# Murmur infrastructure (guide step 2.1). Start with:
-#   docker compose -f deploy/docker-compose.yml up -d
-# Ports are bound to 127.0.0.1 only: the credentials below are local defaults.
+# Murmur (guide steps 2.1 and 2.9).
+#
+#   docker compose -f deploy/docker-compose.yml up -d --build
+#       everything: infrastructure, ingester, consumer, 10 fake drones, Prometheus
+#   docker compose -f deploy/docker-compose.yml up -d nats timescaledb redis
+#       infrastructure only, to run the Go services on the host instead
+#
+# Host SITL (deploy/sitl/run-fleet.sh) can send to the containerised ingester
+# on UDP 127.0.0.1:14560; Docker's UDP forwarding makes it arrive from the
+# network's gateway address (e.g. 172.19.0.1), one port per sender. Ports are bound to 127.0.0.1 only: the credentials
+# below are local defaults.
 name: murmur
 
 services:
@@ -44,6 +52,69 @@ services:
       timeout: 3s
       retries: 10
 
+  ingester:
+    build: &build
+      context: ..
+      dockerfile: deploy/Dockerfile
+      args: { CMD: ingester }
+    image: murmur/ingester:dev
+    command:
+      - -listen=:14560
+      - -nats=nats://nats:4222
+      - -db=postgres://murmur:murmur@timescaledb:5432/murmur
+      - -metrics=:9101
+      - -interval=10s # console report; per second is too much for container logs
+    ports:
+      - "127.0.0.1:14560:14560/udp" # MAVLink from host SITL
+      - "127.0.0.1:9101:9101"       # metrics
+    depends_on:
+      nats: { condition: service_healthy }
+      timescaledb: { condition: service_healthy }
+    restart: unless-stopped
+    healthcheck: &metrics-health
+      test: ["CMD", "wget", "-qO", "/dev/null", "http://localhost:9101/metrics"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  consumer:
+    build: { <<: *build, args: { CMD: consumer } }
+    image: murmur/consumer:dev
+    command:
+      - -nats=nats://nats:4222
+      - -db=postgres://murmur:murmur@timescaledb:5432/murmur
+      - -redis=redis:6379
+      - -metrics=:9102
+      - -interval=30s
+    ports:
+      - "127.0.0.1:9102:9102"
+    depends_on:
+      nats: { condition: service_healthy }
+      timescaledb: { condition: service_healthy }
+      redis: { condition: service_healthy }
+    restart: unless-stopped
+    healthcheck:
+      <<: *metrics-health
+      test: ["CMD", "wget", "-qO", "/dev/null", "http://localhost:9102/metrics"]
+
+  fakegen:
+    build: { <<: *build, args: { CMD: fakegen } }
+    image: murmur/fakegen:dev
+    command: ["-count=10", "-target=ingester:14560"]
+    depends_on:
+      ingester: { condition: service_healthy } # listening before the first heartbeat
+    restart: unless-stopped
+
+  prometheus:
+    image: prom/prometheus:v3.15.1
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    ports:
+      - "127.0.0.1:9090:9090"
+    depends_on: [ingester, consumer]
+
 volumes:
   nats-data:
   pg-data:
+  prometheus-data:

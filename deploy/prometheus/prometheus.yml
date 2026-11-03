@@ -1,0 +1,11 @@
+# Prometheus scrapes every Murmur service (guide step 2.9).
+global:
+  scrape_interval: 5s
+
+scrape_configs:
+  - job_name: ingester
+    static_configs:
+      - targets: ["ingester:9101"]
+  - job_name: consumer
+    static_configs:
+      - targets: ["consumer:9102"]
