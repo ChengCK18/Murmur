@@ -127,11 +127,15 @@ func writeJSON(w http.ResponseWriter, code int, v any) {
 	json.NewEncoder(w).Encode(v) //nolint:errcheck
 }
 
-// spa serves a built single-page app: files that exist, else index.html.
+// spa serves a built single-page app: files that exist, and index.html for
+// other page paths. A missing file with an extension (a script, a stylesheet)
+// is a 404, not the page: HTML served as a script fails with an error that
+// hides the real cause.
 func spa(dir string) http.Handler {
 	files := http.FileServer(http.Dir(dir))
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if _, err := os.Stat(filepath.Join(dir, filepath.Clean(r.URL.Path))); errors.Is(err, os.ErrNotExist) {
+		name := filepath.Clean(r.URL.Path)
+		if _, err := os.Stat(filepath.Join(dir, name)); errors.Is(err, os.ErrNotExist) && filepath.Ext(name) == "" {
 			http.ServeFile(w, r, filepath.Join(dir, "index.html"))
 			return
 		}
