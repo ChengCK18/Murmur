@@ -23,6 +23,9 @@ export interface DroneState {
   last_heartbeat: string;
 }
 
+// A map area in degrees: west, south, east, north.
+export type BBox = [number, number, number, number];
+
 // Messages from the gateway (cmd/gateway/hub.go).
 export type ServerMessage =
   | { type: "snapshot"; drones: DroneState[] }

@@ -57,6 +57,41 @@ test("the map shows the fleet moving", async ({ page }) => {
   expect(errors).toEqual([]);
 });
 
+// drag scrolls the map by dx pixels, three times, far past the followed area.
+async function drag(page: Page, dx: number) {
+  const box = (await page.locator(".maplibregl-canvas").boundingBox())!;
+  const y = box.y + box.height / 2;
+  for (let i = 0; i < 3; i++) {
+    const from = dx > 0 ? box.x + 10 : box.x + box.width - 10;
+    await page.mouse.move(from, y);
+    await page.mouse.down();
+    await page.mouse.move(from + dx, y, { steps: 5 });
+    await page.waitForTimeout(600); // a pause, so the release throws no inertia
+    await page.mouse.up();
+  }
+  await page.waitForTimeout(300);
+}
+
+test("only drones in the map area stay live", async ({ page }) => {
+  await page.goto("/");
+  await expect(page.locator(LIVE)).toHaveCount(DRONES, { timeout: 20_000 });
+  const ids = await page.locator(LIVE).evaluateAll((els) => els.map((e) => Number((e as HTMLElement).dataset.droneId)));
+  const [picked, other] = ids.sort((a, b) => a - b);
+  await page.locator(`.list li[data-drone-id="${picked}"]`).click();
+  await page.waitForTimeout(800); // the centring animation
+
+  // Scrolled far away: the selected drone stays live, the others do not.
+  await drag(page, -900);
+  const before = await position(page, other);
+  await expectMoving(page, picked);
+  await page.waitForTimeout(2500);
+  expect(await position(page, other)).toBe(before);
+
+  // Back again: the area covers it, and it moves.
+  await drag(page, 900);
+  await expectMoving(page, other);
+});
+
 test("Phase 3 check: the browser reconnects after a gateway restart", async ({ page }) => {
   await page.goto("/");
   await expect(page.locator(LIVE)).toHaveCount(DRONES, { timeout: 20_000 });

@@ -2,8 +2,8 @@ import { useEffect, useRef } from "react";
 import { LngLatBounds, Map as MapLibreMap, Marker, setWorkerUrl } from "maplibre-gl";
 import workerUrl from "maplibre-gl/dist/maplibre-gl-worker.mjs?url";
 import "maplibre-gl/dist/maplibre-gl.css";
-import type { DroneState } from "./types";
-import { altitudeLabel, batteryLabel } from "./drones";
+import type { BBox, DroneState } from "./types";
+import { altitudeLabel, batteryLabel, followedArea } from "./drones";
 
 // MapLibre loads and decodes tiles in a web worker, which it looks for next
 // to its own file. Once bundled that file is our assets/index-*.js, where no
@@ -19,25 +19,37 @@ interface Props {
   drones: DroneState[];
   selected: number | null;
   onSelect(id: number): void;
+  onArea(bbox: BBox): void;
 }
 
 // DroneMap draws one marker per drone with a position: an arrow turned to
 // the heading, labelled with altitude and battery, grey once the link is lost.
-export function DroneMap({ drones, selected, onSelect }: Props) {
+// It reports the area it shows whenever that changes, so the page follows only
+// the drones on screen.
+export function DroneMap({ drones, selected, onSelect, onArea }: Props) {
   const container = useRef<HTMLDivElement>(null);
   const map = useRef<MapLibreMap | null>(null);
   const markers = useRef(new Map<number, Marker>());
+  const drawn = useRef(new Map<number, DroneState>()); // the state each marker shows
+  const drawnSelected = useRef<number | null>(null);
   const fitted = useRef(false);
 
   useEffect(() => {
     const m = new MapLibreMap({ container: container.current!, style: STYLE, center: HOME, zoom: 15 });
     map.current = m;
+    const report = () => {
+      const b = m.getBounds();
+      onArea(followedArea([b.getWest(), b.getSouth(), b.getEast(), b.getNorth()]));
+    };
+    m.on("moveend", report);
+    report();
     return () => {
       m.remove();
       map.current = null;
       markers.current.clear();
+      drawn.current.clear();
     };
-  }, []);
+  }, [onArea]);
 
   useEffect(() => {
     const m = map.current;
@@ -54,13 +66,20 @@ export function DroneMap({ drones, selected, onSelect }: Props) {
         mk = new Marker({ element: markerElement(d.drone_id, onSelect) }).setLngLat(at).addTo(m);
         markers.current.set(d.drone_id, mk);
       }
-      mk.setLngLat(at);
-      paint(mk.getElement(), d, d.drone_id === selected);
+      // A thousand drones change a few at a time: leave the others alone.
+      const changed = drawnSelected.current !== selected && (d.drone_id === selected || d.drone_id === drawnSelected.current);
+      if (drawn.current.get(d.drone_id) !== d || changed) {
+        mk.setLngLat(at);
+        paint(mk.getElement(), d, d.drone_id === selected);
+        drawn.current.set(d.drone_id, d);
+      }
     }
+    drawnSelected.current = selected;
     for (const [id, mk] of markers.current) {
       if (!seen.has(id)) {
         mk.remove();
         markers.current.delete(id);
+        drawn.current.delete(id);
       }
     }
     // Show the whole fleet once, when the first positions arrive.

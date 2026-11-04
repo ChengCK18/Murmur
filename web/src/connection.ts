@@ -1,4 +1,4 @@
-import type { DroneState, ServerMessage } from "./types";
+import type { BBox, DroneState, ServerMessage } from "./types";
 
 export type Status = "connecting" | "open" | "reconnecting";
 
@@ -28,14 +28,15 @@ export function backoff(attempt: number): number {
 }
 
 // Connection keeps a WebSocket to the gateway open. After the socket closes it
-// retries with backoff, then subscribes again to every drone so the gateway
-// sends a fresh snapshot.
+// retries with backoff, then asks again for its area and every drone so the
+// gateway sends a fresh snapshot.
 export class Connection {
   private socket?: SocketLike;
   private attempt = 0;
   private timer?: ReturnType<typeof setTimeout>;
   private stopped = false;
   private readonly subs = new Set<number>();
+  private bbox?: BBox;
 
   constructor(
     private readonly url: string,
@@ -71,12 +72,23 @@ export class Connection {
     }
   }
 
+  // area replaces the map area followed: the gateway sends the drones in it.
+  area(bbox: BBox): void {
+    this.bbox = bbox;
+    if (this.socket?.readyState === OPEN) {
+      this.socket.send(JSON.stringify({ type: "subscribe_area", bbox }));
+    }
+  }
+
   private connect(): void {
     const s = this.open(this.url);
     this.socket = s;
     s.onopen = () => {
       this.attempt = 0;
       this.handlers.status("open");
+      if (this.bbox) {
+        s.send(JSON.stringify({ type: "subscribe_area", bbox: this.bbox }));
+      }
       if (this.subs.size > 0) {
         s.send(JSON.stringify({ type: "subscribe", drones: [...this.subs] }));
       }

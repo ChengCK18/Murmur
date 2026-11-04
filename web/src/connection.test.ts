@@ -127,6 +127,25 @@ describe("Connection", () => {
     expect(sockets[1].sent).toEqual([{ type: "subscribe", drones: [1] }]);
   });
 
+  it("follows a map area, and asks for it again after a reconnect", () => {
+    conn.area([1, 2, 3, 4]); // before the socket is open: sent on open
+    conn.subscribe([7]);
+    conn.start();
+    sockets[0].accept();
+    expect(sockets[0].sent).toEqual([
+      { type: "subscribe_area", bbox: [1, 2, 3, 4] },
+      { type: "subscribe", drones: [7] },
+    ]);
+
+    conn.area([5, 6, 7, 8]); // replaces the last one
+    expect(sockets[0].sent.at(-1)).toEqual({ type: "subscribe_area", bbox: [5, 6, 7, 8] });
+
+    sockets[0].drop();
+    vi.advanceTimersByTime(1000);
+    sockets[1].accept();
+    expect(sockets[1].sent[0]).toEqual({ type: "subscribe_area", bbox: [5, 6, 7, 8] });
+  });
+
   it("stops for good", () => {
     conn.start();
     sockets[0].accept();

@@ -1,4 +1,4 @@
-import type { DroneState } from "./types";
+import type { BBox, DroneState } from "./types";
 
 // Drones holds the latest state of every drone the page knows. States from
 // the REST list and the WebSocket meet here; the newer one (by last_seen) wins,
@@ -38,6 +38,14 @@ export class Drones {
   list(): DroneState[] {
     return [...this.byId.values()].sort((a, b) => a.drone_id - b.drone_id);
   }
+}
+
+// followedArea widens the visible map by a quarter on each side, so drones
+// just out of view are live before a pan brings them in.
+export function followedArea([west, south, east, north]: BBox): BBox {
+  const w = (east - west) / 4;
+  const h = (north - south) / 4;
+  return [west - w, south - h, east + w, north + h];
 }
 
 // Labels shown on the map and in the list.
