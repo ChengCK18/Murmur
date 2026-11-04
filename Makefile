@@ -3,7 +3,7 @@
 export GOTOOLCHAIN := local
 COMPOSE := docker compose -f deploy/docker-compose.yml
 
-.PHONY: test itest web-test e2e infra up down
+.PHONY: test itest web-test e2e infra up sitl down
 
 test: ## unit tests; database and Redis tests skip if the infrastructure is not running
 	go test -count=1 ./...
@@ -23,5 +23,8 @@ infra: ## NATS, TimescaleDB and Redis only
 up: ## the whole stack: the map at http://localhost:8080, 10 fake drones, Prometheus
 	$(COMPOSE) up -d --build --wait
 
+sitl: ## the whole stack plus 3 SITL drones; the first build compiles ArduPilot
+	$(COMPOSE) --profile sitl up -d --build --wait
+
 down:
-	$(COMPOSE) down
+	$(COMPOSE) --profile sitl down

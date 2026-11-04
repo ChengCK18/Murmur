@@ -20,7 +20,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The ingester keeps drone IDs in the `drones` table (`-db`), so they survive an ingester restart.
 - `cmd/consumer`: writes telemetry from JetStream to TimescaleDB (applying the schema migrations on start) and each drone's latest state to Redis (`drone:<tenant>:<drone>`), with nothing lost or duplicated across a restart.
 - SITL stream-rate parameters (`deploy/sitl/murmur-streams.parm`) so headless SITL sends position, attitude, system and battery status without a ground station.
-- `deploy/sitl/run-fleet.sh` to start several SITL drones sending straight to the ingester.
+- `deploy/sitl/run-fleet.sh` to start several SITL drones sending straight to the ingester (by name or IP address), lined up south of `fakegen`'s grid so the two fleets can run together.
+- `docker compose --profile sitl up` (`make sitl`) adds 3 ArduCopter SITL drones to the stack. The first build compiles ArduPilot, about 5 minutes; plain `docker compose up` does not need it.
 - `deploy/sitl/run-manual.sh` to start one SITL drone with MAVProxy and QGroundControl for flying by hand, optionally recording to `testdata/`.
 - `deploy/sitl/record.py` to fly scripted idle, mission and restart sessions and record them as `.tlog` files.
 - Test recordings `testdata/idle.tlog`, `testdata/flight.tlog` and `testdata/restart.tlog`, and the `testdata/missions/square.txt` mission.
