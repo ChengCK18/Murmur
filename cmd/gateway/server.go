@@ -47,7 +47,8 @@ func (s *server) routes() http.Handler {
 // handleWS serves one browser (guide step 3.1):
 //
 //	browser → gateway  {"type":"subscribe","drones":[1,2,3]}  {"type":"unsubscribe","drones":[2]}
-//	gateway → browser  {"type":"snapshot","drones":[...]}      on each subscribe
+//	                   {"type":"subscribe_area","bbox":[minLng,minLat,maxLng,maxLat]}  replaces the last area
+//	gateway → browser  {"type":"snapshot","drones":[...]}      on each subscribe; for an area, drones newly in it
 //	                   {"type":"update","drone_id":1,"state":{...}}
 //	                   {"type":"remove","drone_id":1}            silent for -stale
 //	                   {"type":"error","message":"..."}
@@ -91,6 +92,13 @@ func (s *server) handleWS(w http.ResponseWriter, r *http.Request) {
 			}
 		case "unsubscribe":
 			s.hub.unsubscribe(cl, req.Drones)
+		case "subscribe_area":
+			b, err := parseBBox(req.BBox)
+			if err != nil {
+				cl.errorf("subscribe_area: %v", err)
+				continue
+			}
+			s.hub.subscribeArea(ctx, cl, b)
 		default:
 			cl.errorf("unknown request type %q", req.Type)
 		}

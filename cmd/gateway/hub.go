@@ -26,11 +26,13 @@ type hub struct {
 	maxSubs int           // per browser (plan open item 4)
 	rdb     *redis.Client
 
-	mu      sync.Mutex
-	drones  map[int64]*state.Drone // merged from the feed and Redis
-	loaded  map[int64]bool         // Redis hash merged in already
-	removed map[int64]bool         // stale, and subscribers told so
-	subs    map[int64]map[*client]struct{}
+	mu        sync.Mutex
+	drones    map[int64]*state.Drone // merged from the feed and Redis
+	loaded    map[int64]bool         // Redis hash merged in already
+	removed   map[int64]bool         // stale, and subscribers told so
+	subs      map[int64]map[*client]struct{}
+	areas     map[*client]struct{} // clients following a map area
+	allLoaded bool                 // every Redis hash merged in once
 
 	feedMessages atomic.Uint64
 	feedErrors   atomic.Uint64
@@ -43,6 +45,7 @@ func newHub(tenant int64, timeout time.Duration, maxSubs int, rdb *redis.Client)
 		loaded:  map[int64]bool{},
 		removed: map[int64]bool{},
 		subs:    map[int64]map[*client]struct{}{},
+		areas:   map[*client]struct{}{},
 	}
 }
 
@@ -83,6 +86,14 @@ func (h *hub) checkLinks(now time.Time) {
 				for cl := range h.subs[id] {
 					cl.offerRemove(id)
 				}
+				for cl := range h.areas {
+					if _, in := cl.inArea[id]; in {
+						delete(cl.inArea, id)
+						if _, byID := h.subs[id][cl]; !byID {
+							cl.offerRemove(id)
+						}
+					}
+				}
 			}
 			continue
 		}
@@ -102,13 +113,14 @@ func (h *hub) isStale(d *state.Drone, now time.Time) bool {
 // offer gives every subscriber of d one shared copy. The caller holds h.mu.
 func (h *hub) offer(d *state.Drone) {
 	subs := h.subs[d.DroneID]
-	if len(subs) == 0 {
+	if len(subs) == 0 && len(h.areas) == 0 {
 		return
 	}
 	c := d.Clone()
 	for cl := range subs {
 		cl.offer(c)
 	}
+	h.offerAreas(d, c)
 }
 
 // subscribe adds drones to a client, up to the limit, and queues a snapshot
@@ -176,6 +188,7 @@ func (h *hub) remove(cl *client) {
 	for id := range cl.subs {
 		ids = append(ids, id)
 	}
+	delete(h.areas, cl)
 	h.mu.Unlock()
 	h.unsubscribe(cl, ids)
 }
@@ -230,9 +243,27 @@ func (h *hub) load(ctx context.Context, ids []int64) map[int64][]schema.Telemetr
 	return out
 }
 
-// all returns every drone with stored or live state that is not stale,
-// ordered by ID.
-func (h *hub) all(ctx context.Context) ([]*state.Drone, error) {
+// loadOnce merges every Redis hash into the hub the first time it is needed.
+// After that the feed brings every drone that is flying; a browser's map area
+// needs drones the gateway has not heard from since it started, too.
+func (h *hub) loadOnce(ctx context.Context) {
+	h.mu.Lock()
+	done := h.allLoaded
+	h.mu.Unlock()
+	if done {
+		return
+	}
+	if err := h.loadAll(ctx); err != nil {
+		log.Print(err) // the live feed still works, and the next area tries again
+		return
+	}
+	h.mu.Lock()
+	h.allLoaded = true
+	h.mu.Unlock()
+}
+
+// loadAll merges every Redis hash not merged yet into the hub.
+func (h *hub) loadAll(ctx context.Context) error {
 	var ids []int64
 	prefix := "drone:" + strconv.FormatInt(h.tenant, 10) + ":"
 	iter := h.rdb.Scan(ctx, 0, prefix+"*", 500).Iterator()
@@ -243,7 +274,7 @@ func (h *hub) all(ctx context.Context) ([]*state.Drone, error) {
 		}
 	}
 	if err := iter.Err(); err != nil {
-		return nil, fmt.Errorf("redis scan: %w", err)
+		return fmt.Errorf("redis scan: %w", err)
 	}
 	h.mu.Lock()
 	var missing []int64
@@ -258,6 +289,17 @@ func (h *hub) all(ctx context.Context) ([]*state.Drone, error) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	h.mergeLoaded(fromRedis)
+	return nil
+}
+
+// all returns every drone with stored or live state that is not stale,
+// ordered by ID.
+func (h *hub) all(ctx context.Context) ([]*state.Drone, error) {
+	if err := h.loadAll(ctx); err != nil {
+		return nil, err
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
 	now := time.Now()
 	out := make([]*state.Drone, 0, len(h.drones))
 	for id, d := range h.drones {
@@ -299,8 +341,9 @@ type (
 
 // Messages from browsers.
 type request struct {
-	Type   string  `json:"type"` // "subscribe" or "unsubscribe"
-	Drones []int64 `json:"drones"`
+	Type   string    `json:"type"` // "subscribe", "unsubscribe" or "subscribe_area"
+	Drones []int64   `json:"drones,omitempty"`
+	BBox   []float64 `json:"bbox,omitempty"` // minLng, minLat, maxLng, maxLat
 }
 
 func encode(v any) []byte {

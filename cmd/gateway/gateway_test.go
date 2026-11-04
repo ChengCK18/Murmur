@@ -146,6 +146,25 @@ func TestGateway(t *testing.T) {
 		t.Errorf("unknown request: %v", m)
 	}
 
+	if err := wsjson.Write(ctx, conn, map[string]any{"type": "subscribe_area", "bbox": []float64{1, 2}}); err != nil {
+		t.Fatal(err)
+	}
+	if m := read(t, ctx, conn); m["type"] != "error" {
+		t.Errorf("bad bbox: %v", m)
+	}
+
+	// A map area: a new browser gets the drones in it, including one known
+	// only from Redis (guide step 4.3).
+	areaConn, _, err := websocket.Dial(ctx, "ws://"+addr+"/ws", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer areaConn.CloseNow() //nolint:errcheck
+	send(t, ctx, areaConn, request{Type: "subscribe_area", BBox: []float64{149, -36, 150, -35}})
+	if snap := read(t, ctx, areaConn); snap["type"] != "snapshot" || fmt.Sprint(droneIDs(snap)) != "[1]" {
+		t.Errorf("area snapshot %v", snap)
+	}
+
 	// Only the gateway's own origin and the Vite dev server may connect.
 	_, resp, err := websocket.Dial(ctx, "ws://"+addr+"/ws", &websocket.DialOptions{
 		HTTPHeader: http.Header{"Origin": {"http://evil.example"}}})

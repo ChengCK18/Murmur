@@ -266,7 +266,7 @@ func TestRemoveDoesNotOvertakeUpdate(t *testing.T) {
 	cl := newClient(rec.send, time.Hour, counts)
 	cl.offer(stateOf(t, 5))
 	cl.offerRemove(5)
-	if err := cl.flush(context.Background(), true); err != nil {
+	if err := cl.flush(context.Background(), true, true); err != nil {
 		t.Fatal(err)
 	}
 	if msgs := rec.messages(); len(msgs) != 1 || msgs[0]["type"] != "remove" || msgs[0]["drone_id"].(float64) != 5 {

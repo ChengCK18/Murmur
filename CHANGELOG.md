@@ -17,6 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `web/`: the live map (React, MapLibre, OpenFreeMap tiles): one marker per drone turned to its heading and labelled with altitude and battery, greyed out when its link is lost; a drone list that centres the map on a click; a banner and automatic reconnect (1, 2, 4, 8, then every 10 s) when the gateway goes away.
 - The map hides drones not heard from for 10 minutes (gateway `-stale`; `0` shows every drone ever seen), so drones from earlier runs no longer pile up greyed out. A drone that flies again comes back.
 - `cmd/gateway` on `:8080`: a WebSocket (`/ws`) where browsers subscribe to up to 100 drones, get a snapshot and then each drone's latest state at most every 250 ms, with link-lost changes pushed; `GET /api/drones` and `GET /api/health`; metrics on `:9103`.
+- Map-area subscriptions: `{"type":"subscribe_area","bbox":[minLng,minLat,maxLng,maxLat]}` on the WebSocket follows every drone inside an area, once a second each and outside the 100-drone limit.
 - The ingester keeps drone IDs in the `drones` table (`-db`), so they survive an ingester restart.
 - `cmd/consumer`: writes telemetry from JetStream to TimescaleDB (applying the schema migrations on start) and each drone's latest state to Redis (`drone:<tenant>:<drone>`), with nothing lost or duplicated across a restart.
 - SITL stream-rate parameters (`deploy/sitl/murmur-streams.parm`) so headless SITL sends position, attitude, system and battery status without a ground station.
