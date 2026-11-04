@@ -111,7 +111,7 @@ func TestOrderDoesNotMatter(t *testing.T) {
 func TestUnknownValues(t *testing.T) {
 	t0 := time.Unix(1793516806, 0)
 	d := New(1, 7)
-	d.Apply(tel(t, t0, &ardupilotmega.MessageGlobalPositionInt{Hdg: 65535}))                            //nolint:errcheck
+	d.Apply(tel(t, t0, &ardupilotmega.MessageGlobalPositionInt{Lat: 1, Hdg: 65535}))                    //nolint:errcheck
 	d.Apply(tel(t, t0, &ardupilotmega.MessageSysStatus{BatteryRemaining: -1}))                          //nolint:errcheck
 	d.Apply(tel(t, t0, &ardupilotmega.MessageBatteryStatus{BatteryRemaining: -1, CurrentConsumed: -1})) //nolint:errcheck
 	if d.Position.HeadingDeg != nil || d.Battery.Percent != nil || d.Battery.ConsumedMAh != nil {
@@ -125,6 +125,21 @@ func TestUnknownValues(t *testing.T) {
 	// Types the map does not show leave the state alone.
 	if changed, _ := d.Apply(tel(t, t0, &ardupilotmega.MessageAttitude{})); changed {
 		t.Error("ATTITUDE changed the state")
+	}
+}
+
+func TestNoFixIsNoPosition(t *testing.T) {
+	// Before GPS lock a drone reports 0, 0, which is not a place it has been.
+	t0 := time.Unix(1793516806, 0)
+	d := New(1, 7)
+	if changed, _ := d.Apply(tel(t, t0, &ardupilotmega.MessageGlobalPositionInt{})); changed || d.Position != nil {
+		t.Errorf("position %+v from a message with no fix", d.Position)
+	}
+	// Losing the fix keeps the last known position.
+	d.Apply(tel(t, t0.Add(time.Second), &ardupilotmega.MessageGlobalPositionInt{Lat: -353660000, Lon: 1491652370})) //nolint:errcheck
+	d.Apply(tel(t, t0.Add(2*time.Second), &ardupilotmega.MessageGlobalPositionInt{}))                               //nolint:errcheck
+	if d.Position == nil || d.Position.Lat != -35.366 {
+		t.Errorf("position %+v after losing the fix", d.Position)
 	}
 }
 

@@ -26,6 +26,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Test recordings `testdata/idle.tlog`, `testdata/flight.tlog` and `testdata/restart.tlog`, and the `testdata/missions/square.txt` mission.
 
 ### Fixed
+- A drone with no GPS fix yet is no longer drawn at latitude 0, longitude 0, which pulled the map out to show half the world when the page opened during a SITL drone's first seconds.
 - The map was blank: MapLibre could not find its tile worker in the built app, so no tile was ever loaded. The worker is now bundled and the map draws streets, water and land cover.
 - The gateway answers a missing script or stylesheet with 404 instead of the app's page.
 - The ingester no longer crashes on its first report when the `drones` table holds a drone that has not sent anything since the ingester started.

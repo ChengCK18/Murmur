@@ -108,6 +108,9 @@ func (d *Drone) Apply(t schema.Telemetry) (bool, error) {
 		d.Mode, d.Armed = mavlink.ModeName(m), mavlink.IsArmed(m)
 		d.LastHeartbeat = t.ReceivedAt
 	case *ardupilotmega.MessageGlobalPositionInt:
+		if m.Lat == 0 && m.Lon == 0 {
+			return false, nil // no fix yet: SITL sends this for its first seconds
+		}
 		p := PositionOf(m)
 		d.Position = &p
 	case *ardupilotmega.MessageSysStatus:
