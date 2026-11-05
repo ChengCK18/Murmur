@@ -9,6 +9,7 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"math/rand/v2"
 	"net"
 	"os"
 	"os/signal"
@@ -27,6 +28,7 @@ func main() {
 	target := flag.String("target", "127.0.0.1:14560", "ingester UDP address")
 	duration := flag.Duration("duration", 0, "stop after this long; 0 for no limit")
 	messages := flag.Int64("messages", 0, "send exactly this many messages in total, then stop; 0 for no limit")
+	drop := flag.Float64("drop", 0, "share of messages to lose on purpose, from 0 to 1, after they take a sequence number")
 	flag.Parse()
 	log.SetFlags(log.Ltime)
 
@@ -38,17 +40,19 @@ func main() {
 		defer cancel()
 	}
 	log.Printf("%d drones sending to %s", *count, *target)
-	res, err := run(ctx, config{count: *count, target: *target, messages: *messages})
+	res, err := run(ctx, config{count: *count, target: *target, messages: *messages, drop: *drop})
 	if err != nil {
 		log.Fatalf("fakegen: %v", err)
 	}
-	log.Printf("sent %d messages, %d send errors", res.sent, res.errors)
+	// loadtest/failures reads this line.
+	log.Printf("sent %d messages, %d send errors, %d dropped", res.sent, res.errors, res.dropped)
 }
 
 type config struct {
 	count    int
 	target   string
 	messages int64 // 0: no limit
+	drop     float64
 	lookup   func() (*net.UDPAddr, error) // nil: resolve target
 	refresh  time.Duration                // between lookups; 0: lookupEvery
 }
@@ -57,7 +61,8 @@ type config struct {
 const lookupEvery = 5 * time.Second
 
 type result struct {
-	sent, errors int64
+	sent, errors int64 // sent includes the dropped messages
+	dropped      int64
 }
 
 // destination is the ingester's current address. A restarted ingester can come
@@ -88,13 +93,21 @@ func (d *destination) follow(ctx context.Context, every time.Duration) {
 	}
 }
 
-// link is one drone's radio: each Write is one datagram, as SITL sends.
+// link is one drone's radio: each Write is one datagram, as SITL sends. A
+// dropped frame still took a sequence number, so the receiver sees a gap, the
+// same as a packet lost on the way.
 type link struct {
-	conn *net.UDPConn
-	to   *destination
+	conn    *net.UDPConn
+	to      *destination
+	drop    float64
+	dropped *atomic.Int64
 }
 
 func (l *link) Write(p []byte) (int, error) {
+	if l.drop > 0 && rand.Float64() < l.drop {
+		l.dropped.Add(1)
+		return len(p), nil
+	}
 	return l.conn.WriteToUDP(p, l.to.addr.Load())
 }
 
@@ -135,7 +148,7 @@ func run(ctx context.Context, cfg config) (result, error) {
 	b := &budget{limited: cfg.messages > 0}
 	b.left.Store(cfg.messages)
 
-	var sent, errs atomic.Int64
+	var sent, errs, dropped atomic.Int64
 	var wg sync.WaitGroup
 	for i := range cfg.count {
 		conn, err := net.ListenUDP("udp", nil) // a socket, and so a source port, per drone
@@ -143,7 +156,7 @@ func run(ctx context.Context, cfg config) (result, error) {
 			return result{}, fmt.Errorf("drone %d: %w", i, err)
 		}
 		w, err := frame.NewWriter(frame.WriterConf{
-			Writer:         &link{conn: conn, to: to},
+			Writer:         &link{conn: conn, to: to, drop: cfg.drop, dropped: &dropped},
 			DialectRW:      rw,
 			OutVersion:     frame.V2,
 			OutSystemID:    sysID(i),
@@ -162,7 +175,7 @@ func run(ctx context.Context, cfg config) (result, error) {
 		})
 	}
 	wg.Wait()
-	return result{sent: sent.Load(), errors: errs.Load()}, nil
+	return result{sent: sent.Load(), errors: errs.Load(), dropped: dropped.Load()}, nil
 }
 
 // sysID gives drone i a MAVLink system ID from 1 to 250 (255 is a ground

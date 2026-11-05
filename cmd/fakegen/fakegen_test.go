@@ -248,6 +248,55 @@ func listen(t *testing.T) *net.UDPConn {
 	return ln
 }
 
+func TestDrop(t *testing.T) {
+	// Dropped frames take a sequence number and never leave, and the count
+	// fakegen reports is the count missing at the far end.
+	ln := listen(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	const total = 40
+	done := make(chan result, 1)
+	go func() {
+		res, err := run(ctx, config{count: 1, target: ln.LocalAddr().String(), messages: total, drop: 0.25})
+		if err != nil {
+			t.Error(err)
+		}
+		done <- res
+	}()
+
+	d, err := mavlink.NewDecoder()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, top := 0, 0
+	buf := make([]byte, 2048)
+	var res result
+	for finished := false; !finished; {
+		ln.SetReadDeadline(time.Now().Add(100 * time.Millisecond)) //nolint:errcheck
+		n, src, err := ln.ReadFromUDPAddrPort(buf)
+		if err != nil {
+			select {
+			case res = <-done:
+				finished = true
+			default:
+			}
+			continue
+		}
+		frames, err := d.Decode(time.Now(), src, buf[:n])
+		if err != nil || len(frames) != 1 {
+			t.Fatalf("datagram: %d frames, err %v", len(frames), err)
+		}
+		got++
+		top = max(top, int(frames[0].Seq))
+	}
+	if res.sent != total || res.dropped == 0 || int64(got) != res.sent-res.dropped {
+		t.Errorf("sent %d, dropped %d, arrived %d", res.sent, res.dropped, got)
+	}
+	if top < got {
+		t.Errorf("highest sequence %d with %d frames arrived: dropped frames took no number", top, got)
+	}
+}
+
 func TestFollowsTheTarget(t *testing.T) {
 	// A restarted ingester on a new address gets the traffic, from the same
 	// source port.
