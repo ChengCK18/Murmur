@@ -4,9 +4,9 @@ import (
 	"context"
 	"fmt"
 	"strconv"
+	"time"
 
 	"github.com/bluenviron/gomavlib/v3/pkg/dialects/ardupilotmega"
-	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
 
@@ -56,39 +56,44 @@ func batteryPct(v int8) *int16 {
 	return &b
 }
 
+// insertTelemetry stores a whole batch in one statement. Sent row by row a
+// batch costs a statement each, which held the database to about 5,700 rows a
+// second (loadtest/results/before.json).
 const insertTelemetry = `INSERT INTO telemetry (
 	tenant_id, drone_id, msg_type, received_at, time_boot_ms, sys_id, comp_id, seq,
 	lat, lon, alt_m, rel_alt_m, speed_ms, heading_deg, battery_pct, payload
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
-ON CONFLICT DO NOTHING`
+) SELECT * FROM unnest(
+	$1::bigint[], $2::bigint[], $3::text[], $4::timestamptz[], $5::bigint[], $6::smallint[], $7::smallint[], $8::smallint[],
+	$9::float8[], $10::float8[], $11::real[], $12::real[], $13::real[], $14::real[], $15::smallint[], $16::jsonb[]
+) ON CONFLICT DO NOTHING`
 
 // writeDB inserts rows in one transaction and returns how many were new;
 // the rest were already stored (redelivered after a restart).
 func writeDB(ctx context.Context, pool *pgxpool.Pool, rows []row) (int64, error) {
-	var inserted int64
-	err := pgx.BeginFunc(ctx, pool, func(tx pgx.Tx) error {
-		b := &pgx.Batch{}
-		for _, r := range rows {
-			t := r.t
-			b.Queue(insertTelemetry, t.TenantID, t.DroneID, t.Msg, t.ReceivedAt, t.TimeBootMs,
-				int16(t.SysID), int16(t.CompID), int16(t.Seq),
-				r.lat, r.lon, r.alt, r.rel, r.speed, r.hdg, r.battery, []byte(t.Payload))
+	n := len(rows)
+	tenant, drone, boot := make([]int64, n), make([]int64, n), make([]*int64, n)
+	msg, payload := make([]string, n), make([]string, n)
+	at := make([]time.Time, n)
+	sys, comp, seq, battery := make([]int16, n), make([]int16, n), make([]int16, n), make([]*int16, n)
+	lat, lon := make([]*float64, n), make([]*float64, n)
+	alt, rel, speed, hdg := make([]*float32, n), make([]*float32, n), make([]*float32, n), make([]*float32, n)
+	for i, r := range rows {
+		t := r.t
+		tenant[i], drone[i], msg[i], at[i] = t.TenantID, t.DroneID, t.Msg, t.ReceivedAt
+		if t.TimeBootMs != nil {
+			ms := int64(*t.TimeBootMs)
+			boot[i] = &ms
 		}
-		br := tx.SendBatch(ctx, b)
-		for range rows {
-			tag, err := br.Exec()
-			if err != nil {
-				br.Close()
-				return err
-			}
-			inserted += tag.RowsAffected()
-		}
-		return br.Close()
-	})
+		sys[i], comp[i], seq[i] = int16(t.SysID), int16(t.CompID), int16(t.Seq)
+		lat[i], lon[i], alt[i], rel[i], speed[i], hdg[i] = r.lat, r.lon, r.alt, r.rel, r.speed, r.hdg
+		battery[i], payload[i] = r.battery, string(t.Payload)
+	}
+	tag, err := pool.Exec(ctx, insertTelemetry, tenant, drone, msg, at, boot, sys, comp, seq,
+		lat, lon, alt, rel, speed, hdg, battery, payload)
 	if err != nil {
 		return 0, fmt.Errorf("telemetry insert: %w", err)
 	}
-	return inserted, nil
+	return tag.RowsAffected(), nil
 }
 
 // latestState sets one message type in a drone's Redis hash, unless the hash
