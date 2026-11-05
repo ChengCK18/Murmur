@@ -1,0 +1,46 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 360" width="720" height="360" role="img" aria-label="loss">
+<style>
+  svg { --surface:#fcfcfb; --ink:#0b0b0b; --ink2:#52514e; --muted:#898781; --grid:#e1e0d9; --axis:#c3c2b7; --after:#2a78d6; --before:#898781; --ref:#c3c2b7; }
+  @media (prefers-color-scheme: dark) {
+    svg { --surface:#1a1a19; --ink:#f0efec; --ink2:#c3c2b7; --muted:#898781; --grid:#2c2c2a; --axis:#383835; --after:#3987e5; --before:#898781; --ref:#6b6a64; }
+  }
+  text { font-family: system-ui, -apple-system, "Segoe UI", sans-serif; fill: var(--ink2); font-size: 13px; font-variant-numeric: tabular-nums; }
+  .title { fill: var(--ink); font-size: 16px; font-weight: 600; }
+  .sub { font-size: 13px; }
+  .tick { fill: var(--muted); font-size: 12px; }
+  .label { fill: var(--ink); font-size: 13px; }
+</style>
+<rect width="720" height="360" fill="var(--surface)"/>
+<text class="title" x="20" y="28">Packets no longer vanish on the way to the ingester</text>
+<text class="sub" x="20" y="48">Share of packets sent that the ingester never read</text>
+<line x1="72" x2="624" y1="304.0" y2="304.0" stroke="var(--grid)"/>
+<text class="tick" x="64" y="308.0" text-anchor="end">0%</text>
+<line x1="72" x2="624" y1="230.7" y2="230.7" stroke="var(--grid)"/>
+<text class="tick" x="64" y="234.7" text-anchor="end">4%</text>
+<line x1="72" x2="624" y1="157.3" y2="157.3" stroke="var(--grid)"/>
+<text class="tick" x="64" y="161.3" text-anchor="end">8%</text>
+<line x1="72" x2="624" y1="84.0" y2="84.0" stroke="var(--grid)"/>
+<text class="tick" x="64" y="88.0" text-anchor="end">12%</text>
+<line x1="72" x2="624" y1="304" y2="304" stroke="var(--axis)"/>
+<text class="tick" x="127.2" y="322" text-anchor="middle">100</text>
+<text class="tick" x="210.0" y="322" text-anchor="middle">250</text>
+<text class="tick" x="348.0" y="322" text-anchor="middle">500</text>
+<text class="tick" x="624.0" y="322" text-anchor="middle">1,000</text>
+<text class="tick" x="348.0" y="350" text-anchor="middle">Drones (10 messages a second each)</text>
+<polyline points="127.2,304.0 210.0,242.9 348.0,224.1 624.0,121.4" fill="none" stroke="var(--before)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+<circle cx="127.2" cy="304.0" r="4" fill="var(--before)" stroke="var(--surface)" stroke-width="2"/>
+<circle cx="210.0" cy="242.9" r="4" fill="var(--before)" stroke="var(--surface)" stroke-width="2"/>
+<circle cx="348.0" cy="224.1" r="4" fill="var(--before)" stroke="var(--surface)" stroke-width="2"/>
+<circle cx="624.0" cy="121.4" r="4" fill="var(--before)" stroke="var(--surface)" stroke-width="2"/>
+<text class="label" x="633.0" y="125.4">Before</text>
+<polyline points="127.2,302.2 210.0,304.0 348.0,304.0 624.0,304.0" fill="none" stroke="var(--after)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+<circle cx="127.2" cy="302.2" r="4" fill="var(--after)" stroke="var(--surface)" stroke-width="2"/>
+<circle cx="210.0" cy="304.0" r="4" fill="var(--after)" stroke="var(--surface)" stroke-width="2"/>
+<circle cx="348.0" cy="304.0" r="4" fill="var(--after)" stroke="var(--surface)" stroke-width="2"/>
+<circle cx="624.0" cy="304.0" r="4" fill="var(--after)" stroke="var(--surface)" stroke-width="2"/>
+<text class="label" x="633.0" y="308.0">After</text>
+<rect x="20" y="60" width="12" height="4" rx="2" fill="var(--before)"/>
+<text x="37" y="66" class="tick">Before</text>
+<rect x="90" y="60" width="12" height="4" rx="2" fill="var(--after)"/>
+<text x="107" y="66" class="tick">After</text>
+</svg>

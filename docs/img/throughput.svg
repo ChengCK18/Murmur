@@ -1,0 +1,57 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 360" width="720" height="360" role="img" aria-label="throughput">
+<style>
+  svg { --surface:#fcfcfb; --ink:#0b0b0b; --ink2:#52514e; --muted:#898781; --grid:#e1e0d9; --axis:#c3c2b7; --after:#2a78d6; --before:#898781; --ref:#c3c2b7; }
+  @media (prefers-color-scheme: dark) {
+    svg { --surface:#1a1a19; --ink:#f0efec; --ink2:#c3c2b7; --muted:#898781; --grid:#2c2c2a; --axis:#383835; --after:#3987e5; --before:#898781; --ref:#6b6a64; }
+  }
+  text { font-family: system-ui, -apple-system, "Segoe UI", sans-serif; fill: var(--ink2); font-size: 13px; font-variant-numeric: tabular-nums; }
+  .title { fill: var(--ink); font-size: 16px; font-weight: 600; }
+  .sub { font-size: 13px; }
+  .tick { fill: var(--muted); font-size: 12px; }
+  .label { fill: var(--ink); font-size: 13px; }
+</style>
+<rect width="720" height="360" fill="var(--surface)"/>
+<text class="title" x="20" y="28">Rows reach the database as fast as drones send them, up to about 14,000 a second</text>
+<text class="sub" x="20" y="48">Rows written per second, measured over 60 s at each fleet size</text>
+<line x1="72" x2="624" y1="304.0" y2="304.0" stroke="var(--grid)"/>
+<text class="tick" x="64" y="308.0" text-anchor="end">0</text>
+<line x1="72" x2="624" y1="249.0" y2="249.0" stroke="var(--grid)"/>
+<text class="tick" x="64" y="253.0" text-anchor="end">8,000</text>
+<line x1="72" x2="624" y1="194.0" y2="194.0" stroke="var(--grid)"/>
+<text class="tick" x="64" y="198.0" text-anchor="end">16,000</text>
+<line x1="72" x2="624" y1="139.0" y2="139.0" stroke="var(--grid)"/>
+<text class="tick" x="64" y="143.0" text-anchor="end">24,000</text>
+<line x1="72" x2="624" y1="84.0" y2="84.0" stroke="var(--grid)"/>
+<text class="tick" x="64" y="88.0" text-anchor="end">32,000</text>
+<line x1="72" x2="624" y1="304" y2="304" stroke="var(--axis)"/>
+<text class="tick" x="90.4" y="322" text-anchor="middle">100</text>
+<text class="tick" x="164.0" y="322" text-anchor="middle">500</text>
+<text class="tick" x="256.0" y="322" text-anchor="middle">1,000</text>
+<text class="tick" x="348.0" y="322" text-anchor="middle">1,500</text>
+<text class="tick" x="440.0" y="322" text-anchor="middle">2,000</text>
+<text class="tick" x="624.0" y="322" text-anchor="middle">3,000</text>
+<text class="tick" x="348.0" y="350" text-anchor="middle">Drones (10 messages a second each)</text>
+<polyline points="72.0,304.0 624.0,97.8" fill="none" stroke="var(--ref)" stroke-width="2" stroke-linecap="round"/>
+<polyline points="90.4,297.1 118.0,287.4 164.0,271.1 256.0,265.1" fill="none" stroke="var(--before)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+<circle cx="90.4" cy="297.1" r="4" fill="var(--before)" stroke="var(--surface)" stroke-width="2"/>
+<circle cx="118.0" cy="287.4" r="4" fill="var(--before)" stroke="var(--surface)" stroke-width="2"/>
+<circle cx="164.0" cy="271.1" r="4" fill="var(--before)" stroke="var(--surface)" stroke-width="2"/>
+<circle cx="256.0" cy="265.1" r="4" fill="var(--before)" stroke="var(--surface)" stroke-width="2"/>
+<text class="label" x="265.0" y="281.1">Before</text>
+<polyline points="90.4,297.1 118.0,286.8 164.0,269.6 256.0,235.2 348.0,207.3 440.0,212.6 624.0,217.5" fill="none" stroke="var(--after)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+<circle cx="90.4" cy="297.1" r="4" fill="var(--after)" stroke="var(--surface)" stroke-width="2"/>
+<circle cx="118.0" cy="286.8" r="4" fill="var(--after)" stroke="var(--surface)" stroke-width="2"/>
+<circle cx="164.0" cy="269.6" r="4" fill="var(--after)" stroke="var(--surface)" stroke-width="2"/>
+<circle cx="256.0" cy="235.2" r="4" fill="var(--after)" stroke="var(--surface)" stroke-width="2"/>
+<circle cx="348.0" cy="207.3" r="4" fill="var(--after)" stroke="var(--surface)" stroke-width="2"/>
+<circle cx="440.0" cy="212.6" r="4" fill="var(--after)" stroke="var(--surface)" stroke-width="2"/>
+<circle cx="624.0" cy="217.5" r="4" fill="var(--after)" stroke="var(--surface)" stroke-width="2"/>
+<text class="label" x="633.0" y="221.5">After</text>
+<text class="tick" x="248.0" y="221.2" text-anchor="end">the 10,000 a second target</text>
+<rect x="20" y="60" width="12" height="4" rx="2" fill="var(--ref)"/>
+<text x="37" y="66" class="tick">Sent by the drones</text>
+<rect x="174" y="60" width="12" height="4" rx="2" fill="var(--before)"/>
+<text x="191" y="66" class="tick">Before</text>
+<rect x="244" y="60" width="12" height="4" rx="2" fill="var(--after)"/>
+<text x="261" y="66" class="tick">After</text>
+</svg>

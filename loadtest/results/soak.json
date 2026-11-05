@@ -1,0 +1,32 @@
+[
+  {
+    "drones": 1000,
+    "offered_per_s": 10000,
+    "received_per_s": 10000,
+    "published_per_s": 10000,
+    "inserted_per_s": 10000,
+    "gateway_feed_per_s": 10000,
+    "browser_messages_per_s": 1033,
+    "frames_lost_per_s": 0,
+    "loss_pct": 0.0,
+    "queue_dropped": 0,
+    "link_losses": 0,
+    "publish_errors": 0,
+    "lag_at_end": 1914,
+    "commit_p50_ms": 184.4,
+    "commit_p99_ms": 502.2,
+    "send_p50_ms": 128.5,
+    "send_p99_ms": 253.5,
+    "area_send_p50_ms": 185.1,
+    "area_send_p99_ms": 284.2,
+    "cpu_pct": {
+      "ingester": 55,
+      "consumer": 37,
+      "gateway": 46,
+      "timescaledb": 47,
+      "nats": 55,
+      "redis": 15
+    },
+    "drain_s": 5
+  }
+]
