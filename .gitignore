@@ -1,6 +1,7 @@
 local/
 .sitl/
 *.tlog.raw
+__pycache__/
 
 # Go build output
 /ingester

@@ -97,9 +97,11 @@ test("Phase 3 check: the browser reconnects after a gateway restart", async ({ p
   await expect(page.locator(LIVE)).toHaveCount(DRONES, { timeout: 20_000 });
   const id = await firstDrone(page);
 
-  execSync(`${compose} restart gateway`, { stdio: "inherit" });
+  // Killed, not stopped: it gets no chance to close the WebSocket properly.
+  execSync(`${compose} kill gateway`, { stdio: "inherit" });
   // The banner shows while the gateway is away, and goes by itself.
   await expect(page.getByTestId("banner")).toBeVisible({ timeout: 10_000 });
+  execSync(`${compose} start gateway`, { stdio: "inherit" });
   await expect(page.getByTestId("banner")).toBeHidden({ timeout: 30_000 });
   // The markers carry on moving, on the fresh snapshot and updates.
   await expectMoving(page, id);

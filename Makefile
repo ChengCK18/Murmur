@@ -3,7 +3,7 @@
 export GOTOOLCHAIN := local
 COMPOSE := docker compose -f deploy/docker-compose.yml
 
-.PHONY: test itest web-test e2e infra up sitl down
+.PHONY: test itest web-test e2e failures infra up sitl down
 
 test: ## unit tests; database and Redis tests skip if the infrastructure is not running
 	go test -count=1 ./...
@@ -16,6 +16,9 @@ web-test: ## the web app's type check and unit tests
 
 e2e: ## browser tests against the running stack (make up first); restarts the gateway and fakegen
 	cd web && npx playwright test --reporter=line
+
+failures: ## the failure tests against the running stack (about 10 minutes); kills services under load
+	rc=0; for t in kill_consumer restart_database kill_ingester kill_gateway drop_packets; do loadtest/failures/$$t.py || rc=1; done; exit $$rc
 
 infra: ## NATS, TimescaleDB and Redis only
 	$(COMPOSE) up -d --wait nats timescaledb redis
