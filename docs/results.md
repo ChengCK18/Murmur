@@ -1,8 +1,10 @@
-# Load test results
+# Load and failure test results
 
 Murmur met its ingest target: **10,000 messages a second from 1,000 drones, held for 5 minutes, with no packets lost.** Half of those messages reached the database within 184 ms and 99% within about 500 ms.
 
 Getting there took two fixes. The first run lost 10% of its packets at the UDP socket and stored only 5,664 rows a second.
+
+It also met every failure limit in the plan: [each service was killed under load](#failure-tests), and no message that reached the stream was lost or stored twice.
 
 ## How it was measured
 
@@ -100,9 +102,40 @@ The consumer stored a batch as up to 500 separate `INSERT` statements, which hel
 
 **Fix:** one `INSERT` per batch, with the columns sent as arrays through `unnest`. The same rows now take TimescaleDB about 47% CPU at nearly twice the rate. `ON CONFLICT DO NOTHING` still drops redelivered rows: the Phase 2 test, which kills the consumer partway through 20,000 messages, passed unchanged with exactly 20,000 rows.
 
+## Failure tests
+
+Each test kills a service with SIGKILL, so nothing gets to finish its work, then checks the result against a limit in the plan. Run them all with `make failures` (about 7 minutes) or one at a time from `loadtest/failures/`. Results are in `loadtest/results/failures.json`.
+
+| Failure | Limit | Result | |
+|---|---|---|---|
+| Consumer killed for 30 s, 1,000 drones | Nothing lost or duplicated | 600,000 sent, 600,000 stored | Pass |
+| Consumer killed for 9.5 minutes, 100 drones | Same, for an outage under 10 minutes | 600,000 sent, 600,000 stored | Pass |
+| Database killed for 30 s, 1,000 drones | Nothing lost or duplicated | 600,000 sent, 600,000 stored | Pass |
+| Ingester killed for 10 s, 1,000 drones | Ingesting again within 5 s of the restart | 0.26 s, every drone kept its ID | Pass |
+| Gateway killed, Chrome connected | The browser reconnects and updates resume | Reconnected by itself, the same drones moving | Pass |
+| 5% of packets dropped, 100 drones | The loss counter tells the truth, and what arrives is stored | 3,004 dropped, 2,994 counted; 56,944 of 56,944 eligible packets stored | Pass |
+
+**Consumer and database.** The fleet kept flying through each outage, and the consumer caught up about 25 s after the last message. Stored rows are counted against what fakegen reports sending. The table's unique key rules out a duplicate row, so an equal count also means nothing is missing.
+
+Whether a kill leaves a batch written but unacknowledged is down to timing, and in the recorded runs it did not. In earlier runs of the same tests it did, and 500 and 1,000 redelivered rows were dropped as duplicates, with the totals still exact.
+
+The 9.5-minute run tests the edge of the 10-minute retention window at a lower rate. At a full 10,000 messages a second the stream would hold about 5.7 million messages and catching up would take over 20 minutes, because the consumer only has about 4,000 rows a second to spare. That case was not run. Messages stay safe as long as the consumer is faster than the drones, since the oldest waiting message then gets younger as it catches up.
+
+**Ingester.** 112,860 messages were lost, the plan's accepted cost: UDP has no retry. That is about 11 s of traffic, from the 10 s outage and the test's checks either side of it. The rate was back to 10,000 a second when next measured, 6 s after the restart.
+
+**Packet drops.** The counters differ by 10 because a drop in a drone's last moments leaves no gap to see, and one before a drone's first heartbeat comes before the ingester knows it. For the same reason 52 frames that did arrive were not stored: they came before a first heartbeat. `tc netem` needs root and gives no count, so fakegen does the dropping (`-drop`).
+
+Running these found two bugs, both fixed:
+
+- **Link counters fell.** Rebinding a drone discarded its counts, so counters such as `murmur_ingester_link_losses_total` went down. Prometheus reads that as a reset, which gives a false spike.
+- **fakegen stayed on the ingester's old address.** An ingester back on a new IP address received nothing until fakegen was restarted too. It now looks the name up every 5 s.
+
+Setting up also showed that after a reboot the services looped on infrastructure that never came back, as NATS, TimescaleDB, Redis and Prometheus had no restart policy. They do now, but this has not been tested with a real reboot.
+
 ## Limits of these results
 
 - **One machine.** The load generator shares the CPU with the platform, and all traffic stays on this machine, so these numbers leave out real network delay and loss.
 - **Fake drones are steady.** They send evenly spaced messages. Real fleets send bursts, which would test the buffers harder.
 - **Not yet measured under the fixed stack:** the map page itself. With a real browser and 1,000 drones it drew 4.4 frames a second, but that was before the fixes and on software rendering with no GPU, so it says little about a normal machine.
+- **Not failure tested:** restarts of NATS and Redis, which the plan's limits do not cover, and a real power loss, since the database and the stream's files stay on a healthy disk.
 - **Partitioned consumers were not added.** The guide suggests them if the consumer is the limit. The target is met with 30% or more to spare, so they can wait until a higher target calls for them.
