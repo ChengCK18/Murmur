@@ -23,6 +23,7 @@ services:
       - "127.0.0.1:8222:8222" # monitoring
     volumes:
       - nats-data:/data
+    restart: unless-stopped
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:8222/healthz?js-enabled-only=true"]
       interval: 5s
@@ -39,6 +40,7 @@ services:
       - "127.0.0.1:5432:5432"
     volumes:
       - pg-data:/var/lib/postgresql/data
+    restart: unless-stopped
     healthcheck:
       test: ["CMD", "pg_isready", "-U", "murmur", "-d", "murmur"]
       interval: 5s
@@ -49,6 +51,7 @@ services:
     image: redis:8.10.3-alpine
     ports:
       - "127.0.0.1:6379:6379"
+    restart: unless-stopped
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
@@ -143,6 +146,7 @@ services:
     ports:
       - "127.0.0.1:9090:9090"
     depends_on: [ingester, consumer, gateway]
+    restart: unless-stopped
 
 volumes:
   nats-data:
