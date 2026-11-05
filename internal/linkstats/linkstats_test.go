@@ -140,6 +140,23 @@ func TestForget(t *testing.T) {
 	}
 }
 
+func TestForgetKeepsTotals(t *testing.T) {
+	// The totals are Prometheus counters: a rebound drone must not lower them.
+	tr := New(DefaultTimeout)
+	tr.Observe(frame(drone, 0, 0, heartbeat()))
+	tr.Observe(frame(drone, 100*time.Millisecond, 4, sysStatus())) // 3 frames lost
+	tr.Tick(t0.Add(time.Minute))                                   // one link loss
+	before := tr.Totals()
+	tr.Forget(drone)
+	after := tr.Totals()
+	if after.Lost != 3 || after.LinkLosses != 1 || after.Frames != before.Frames {
+		t.Errorf("totals fell: %+v to %+v", before, after)
+	}
+	if after.Senders != 0 || after.LinkUp != 0 {
+		t.Errorf("a forgotten sender still counts as present: %+v", after)
+	}
+}
+
 // replay feeds a recording through a Tracker, ticking every 100 ms of recorded
 // time as the ingester's ticker would, and returns the drone's link events.
 func replay(t *testing.T, name string) (*Tracker, []string) {

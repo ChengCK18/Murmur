@@ -89,6 +89,7 @@ type Tracker struct {
 	mu      sync.Mutex
 	timeout time.Duration
 	senders map[Key]*sender
+	gone    Totals // counters of forgotten senders, so the totals never fall
 }
 
 // New returns a Tracker that declares a link lost after timeout without a
@@ -202,7 +203,7 @@ type Totals struct {
 func (t *Tracker) Totals() Totals {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	var tot Totals
+	tot := t.gone
 	for _, s := range t.senders {
 		tot.Frames += s.Frames
 		tot.Lost += s.Lost
@@ -217,9 +218,15 @@ func (t *Tracker) Totals() Totals {
 }
 
 // Forget drops a sender, for example one whose drone now sends from a new
-// address after a restart.
+// address after a restart. Its counters stay in the totals.
 func (t *Tracker) Forget(k Key) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	delete(t.senders, k)
+	if s, ok := t.senders[k]; ok {
+		t.gone.Frames += s.Frames
+		t.gone.Lost += s.Lost
+		t.gone.Resets += s.Resets
+		t.gone.LinkLosses += s.LinkLosses
+		delete(t.senders, k)
+	}
 }
