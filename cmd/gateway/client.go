@@ -15,6 +15,10 @@ import (
 type counters struct {
 	sent      atomic.Uint64 // messages written to browsers
 	coalesced atomic.Uint64 // updates replaced by a newer one before being sent
+
+	// latency observes receive to send: from the ingester receiving a frame
+	// to the gateway writing it to a browser. NFR-2 reports its p50 and p99.
+	latency func(area bool, d time.Duration) // nil: not measured
 }
 
 // areaEvery slows updates for drones followed by map area: they go out every
@@ -174,13 +178,13 @@ func (c *client) flush(ctx context.Context, updates, area bool) error {
 			return err
 		}
 	}
-	if err := c.writeStates(ctx, pending); err != nil {
+	if err := c.writeStates(ctx, pending, false); err != nil {
 		return err
 	}
-	return c.writeStates(ctx, areaPending)
+	return c.writeStates(ctx, areaPending, true)
 }
 
-func (c *client) writeStates(ctx context.Context, pending map[int64]*state.Drone) error {
+func (c *client) writeStates(ctx context.Context, pending map[int64]*state.Drone, area bool) error {
 	ids := make([]int64, 0, len(pending))
 	for id := range pending {
 		ids = append(ids, id)
@@ -193,6 +197,10 @@ func (c *client) writeStates(ctx context.Context, pending map[int64]*state.Drone
 		}
 		if err := c.write(ctx, encode(msg)); err != nil {
 			return err
+		}
+		// A link-lost push carries an old message: its age is the silence.
+		if d := pending[id]; d != nil && d.Link == state.LinkOK && c.counts.latency != nil {
+			c.counts.latency(area, time.Since(d.LastSeen))
 		}
 	}
 	return nil
