@@ -5,6 +5,7 @@ import (
 	"math"
 	"net"
 	"net/netip"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -234,5 +235,47 @@ func TestSend(t *testing.T) {
 	}
 	if len(ids) != drones {
 		t.Errorf("system IDs %v, want %d distinct", ids, drones)
+	}
+}
+
+func listen(t *testing.T) *net.UDPConn {
+	t.Helper()
+	ln, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { ln.Close() })
+	return ln
+}
+
+func TestFollowsTheTarget(t *testing.T) {
+	// A restarted ingester on a new address gets the traffic, from the same
+	// source port.
+	first, second := listen(t), listen(t)
+	var moved atomic.Bool
+	lookup := func() (*net.UDPAddr, error) {
+		if moved.Load() {
+			return second.LocalAddr().(*net.UDPAddr), nil
+		}
+		return first.LocalAddr().(*net.UDPAddr), nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	go run(ctx, config{count: 1, lookup: lookup, refresh: 10 * time.Millisecond}) //nolint:errcheck
+
+	buf := make([]byte, 2048)
+	first.SetReadDeadline(time.Now().Add(5 * time.Second)) //nolint:errcheck
+	_, before, err := first.ReadFromUDPAddrPort(buf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	moved.Store(true)
+	second.SetReadDeadline(time.Now().Add(5 * time.Second)) //nolint:errcheck
+	_, after, err := second.ReadFromUDPAddrPort(buf)
+	if err != nil {
+		t.Fatalf("nothing at the new address: %v", err)
+	}
+	if before.Port() != after.Port() {
+		t.Errorf("source port changed from %d to %d", before.Port(), after.Port())
 	}
 }

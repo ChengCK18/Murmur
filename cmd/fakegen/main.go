@@ -49,10 +49,53 @@ type config struct {
 	count    int
 	target   string
 	messages int64 // 0: no limit
+	lookup   func() (*net.UDPAddr, error) // nil: resolve target
+	refresh  time.Duration                // between lookups; 0: lookupEvery
 }
+
+// lookupEvery is how often the target is looked up again.
+const lookupEvery = 5 * time.Second
 
 type result struct {
 	sent, errors int64
+}
+
+// destination is the ingester's current address. A restarted ingester can come
+// back on a new IP address, and a real drone's ground link would follow it, so
+// the name is looked up again while the fleet flies. Each drone keeps its
+// socket, so the ingester still sees the same source port.
+type destination struct {
+	addr   atomic.Pointer[net.UDPAddr]
+	lookup func() (*net.UDPAddr, error)
+}
+
+func (d *destination) follow(ctx context.Context, every time.Duration) {
+	t := time.NewTicker(every)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+		}
+		addr, err := d.lookup()
+		if err != nil {
+			continue // the name goes while the ingester is down: keep the last address
+		}
+		if old := d.addr.Swap(addr); old.String() != addr.String() {
+			log.Printf("target moved from %v to %v", old, addr)
+		}
+	}
+}
+
+// link is one drone's radio: each Write is one datagram, as SITL sends.
+type link struct {
+	conn *net.UDPConn
+	to   *destination
+}
+
+func (l *link) Write(p []byte) (int, error) {
+	return l.conn.WriteToUDP(p, l.to.addr.Load())
 }
 
 // budget hands out the -messages allowance across all drones.
@@ -67,10 +110,24 @@ func (b *budget) take() bool {
 
 // run sends until ctx ends or the message budget is used up.
 func run(ctx context.Context, cfg config) (result, error) {
-	addr, err := net.ResolveUDPAddr("udp", cfg.target)
+	lookup := cfg.lookup
+	if lookup == nil {
+		lookup = func() (*net.UDPAddr, error) { return net.ResolveUDPAddr("udp", cfg.target) }
+	}
+	addr, err := lookup()
 	if err != nil {
 		return result{}, err
 	}
+	to := &destination{lookup: lookup}
+	to.addr.Store(addr)
+	refresh := cfg.refresh
+	if refresh == 0 {
+		refresh = lookupEvery
+	}
+	followCtx, stopFollowing := context.WithCancel(ctx)
+	defer stopFollowing()
+	go to.follow(followCtx, refresh)
+
 	rw, err := dialect.NewReadWriter(ardupilotmega.Dialect)
 	if err != nil {
 		return result{}, err
@@ -81,12 +138,12 @@ func run(ctx context.Context, cfg config) (result, error) {
 	var sent, errs atomic.Int64
 	var wg sync.WaitGroup
 	for i := range cfg.count {
-		conn, err := net.DialUDP("udp", nil, addr) // a socket, and so a source port, per drone
+		conn, err := net.ListenUDP("udp", nil) // a socket, and so a source port, per drone
 		if err != nil {
 			return result{}, fmt.Errorf("drone %d: %w", i, err)
 		}
 		w, err := frame.NewWriter(frame.WriterConf{
-			Writer:         conn, // one Write per frame: one datagram per frame, as SITL sends
+			Writer:         &link{conn: conn, to: to},
 			DialectRW:      rw,
 			OutVersion:     frame.V2,
 			OutSystemID:    sysID(i),

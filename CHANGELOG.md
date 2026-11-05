@@ -32,6 +32,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The consumer writes each batch in one statement, raising its limit from about 5,700 to about 14,000 rows a second.
 
 ### Fixed
+- `fakegen` follows the ingester to a new IP address, which it can get when restarted; before, the drones kept sending to the old one until `fakegen` was restarted too.
 - The whole stack comes back after a reboot: NATS, TimescaleDB, Redis and Prometheus now have a restart policy, where before the services that need them restarted forever.
 - `murmur_ingester_frames_lost_total`, `murmur_ingester_link_losses_total` and the other link counters no longer fall when a drone is rebound to a new address.
 - The ingester no longer loses packets above 250 drones: it reads the socket in its own goroutine, with a 4 MB buffer (`-read-buffer`) and a queue (`-queue`) whose drops are counted in `murmur_ingester_queue_dropped_total`. Healthy drones no longer flip to "link lost" under load.
