@@ -16,6 +16,7 @@ func (in *ingester) registerMetrics(reg prometheus.Registerer) {
 		}
 	}
 	metrics.Counter(reg, "murmur_ingester_packets_total", "UDP datagrams received.", locked(func() uint64 { return in.packets }))
+	metrics.Counter(reg, "murmur_ingester_queue_dropped_total", "Packets dropped because processing fell behind.", func() float64 { return float64(in.queueDropped.Load()) })
 	metrics.Counter(reg, "murmur_ingester_frames_total", "MAVLink frames decoded.", locked(func() uint64 { return in.frames }))
 	metrics.Counter(reg, "murmur_ingester_decode_errors_total", "Datagrams with bytes that are not valid MAVLink.", locked(func() uint64 { return in.decodeErrors }))
 	metrics.Counter(reg, "murmur_ingester_frames_ignored_total", "Frames from ground stations.", locked(func() uint64 { return in.ignored }))

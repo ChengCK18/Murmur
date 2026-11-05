@@ -8,12 +8,10 @@ package main
 
 import (
 	"context"
-	"errors"
 	"flag"
 	"fmt"
 	"log"
 	"net"
-	"net/netip"
 	"net/url"
 	"os"
 	"os/signal"
@@ -38,11 +36,13 @@ func main() {
 	tenant := flag.Int64("tenant", 1, "tenant ID stamped on every message")
 	dbURL := flag.String("db", "postgres://murmur:murmur@127.0.0.1:5432/murmur", `TimescaleDB holding drone IDs; "" to keep them in memory`)
 	metricsAddr := flag.String("metrics", ":9101", `address to serve Prometheus /metrics on; "" for none`)
+	readBuffer := flag.Int("read-buffer", 4<<20, "UDP socket buffer in bytes; the kernel caps it at net.core.rmem_max")
+	queue := flag.Int("queue", 1<<16, "most packets waiting to be processed")
 	flag.Parse()
 	log.SetFlags(0)
 
 	cfg := config{listen: *listen, interval: *interval, timeout: *timeout, natsURL: *natsURL, maxPending: *maxPending,
-		tenant: *tenant, dbURL: *dbURL, metricsAddr: *metricsAddr}
+		tenant: *tenant, dbURL: *dbURL, metricsAddr: *metricsAddr, readBuffer: *readBuffer, queue: *queue}
 	if err := run(cfg); err != nil {
 		log.Fatalf("ingester: %v", err)
 	}
@@ -56,6 +56,7 @@ type config struct {
 	tenant            int64
 	dbURL             string
 	metricsAddr       string
+	readBuffer, queue int
 }
 
 func run(cfg config) error {
@@ -70,6 +71,9 @@ func run(cfg config) error {
 		return err
 	}
 	defer conn.Close()
+	if err := conn.SetReadBuffer(cfg.readBuffer); err != nil {
+		return err
+	}
 
 	in, err := newIngester(cfg.timeout, os.Stdout)
 	if err != nil {
@@ -129,20 +133,10 @@ func run(cfg config) error {
 	}()
 
 	fmt.Printf("listening on %v (Ctrl-C to stop)\n", conn.LocalAddr())
-	buf := make([]byte, 65535)
-	for {
-		n, src, err := conn.ReadFromUDPAddrPort(buf)
-		if err != nil {
-			if ctx.Err() != nil || errors.Is(err, net.ErrClosed) {
-				break
-			}
-			log.Printf("read: %v", err)
-			continue
-		}
-		// On a dual-stack socket IPv4 senders arrive as ::ffff:a.b.c.d;
-		// unmap them so addresses print and compare as plain IPv4.
-		src = netip.AddrPortFrom(src.Addr().Unmap(), src.Port())
-		in.handlePacket(time.Now(), src, buf[:n])
+	queue := make(chan packet, cfg.queue)
+	go receive(conn, queue, &in.queueDropped)
+	for p := range queue {
+		in.handlePacket(p.at, p.src, p.data)
 	}
 
 	fmt.Print("\nstopped\n", in.tick(time.Now()))

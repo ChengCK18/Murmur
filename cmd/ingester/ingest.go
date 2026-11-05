@@ -6,6 +6,7 @@ import (
 	"net/netip"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/bluenviron/gomavlib/v3/pkg/dialects/ardupilotmega"
@@ -37,6 +38,8 @@ type ingester struct {
 	events io.Writer // one line per notable event
 	pub    publisher // nil: console only
 	tenant int64
+
+	queueDropped atomic.Uint64 // packets dropped because processing fell behind
 
 	mu           sync.Mutex
 	drones       map[registry.ID]*telemetry

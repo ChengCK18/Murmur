@@ -28,6 +28,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Test recordings `testdata/idle.tlog`, `testdata/flight.tlog` and `testdata/restart.tlog`, and the `testdata/missions/square.txt` mission.
 
 ### Fixed
+- The ingester no longer loses packets above 250 drones: it reads the socket in its own goroutine, with a 4 MB buffer (`-read-buffer`) and a queue (`-queue`) whose drops are counted in `murmur_ingester_queue_dropped_total`. Healthy drones no longer flip to "link lost" under load.
 - A drone with no GPS fix yet is no longer drawn at latitude 0, longitude 0, which pulled the map out to show half the world when the page opened during a SITL drone's first seconds.
 - The map was blank: MapLibre could not find its tile worker in the built app, so no tile was ever loaded. The worker is now bundled and the map draws streets, water and land cover.
 - The gateway answers a missing script or stylesheet with 404 instead of the app's page.
