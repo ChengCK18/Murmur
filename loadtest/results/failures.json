@@ -1,0 +1,65 @@
+{
+  "kill_consumer (1000 drones, 30 s)": {
+    "passed": true,
+    "limit": "zero messages lost, zero duplicated, outage under 10 minutes",
+    "lines": [
+      "killed at 101,508 rows, down for 30 s at 10,000 messages a second",
+      "ok: no rows written during the outage",
+      "caught up 22 s after the last message; 0 redelivered rows dropped as duplicates",
+      "ok: 0 publish errors",
+      "ok: 0 frames sent before a drone's first heartbeat",
+      "ok: sent 600,000, stored 600,000: 0 missing"
+    ]
+  },
+  "restart_database (1000 drones, 30 s)": {
+    "passed": true,
+    "limit": "zero messages lost, zero duplicated, outage under 10 minutes",
+    "lines": [
+      "database answering 3.5 s after its restart",
+      "ok: the consumer saw the outage: batches failed and were left for redelivery",
+      "caught up 25 s after the last message; 0 redelivered rows dropped as duplicates",
+      "ok: 0 publish errors",
+      "ok: 0 frames sent before a drone's first heartbeat",
+      "ok: sent 600,000, stored 600,000: 0 missing"
+    ]
+  },
+  "kill_ingester (1000 drones, 10 s)": {
+    "passed": true,
+    "limit": "ingestion resumes within 5 s of the restart",
+    "lines": [
+      "ok: first message published 0.26 s after the restart",
+      "ok: publishing 10,004 messages a second, of 10,000 sent",
+      "ok: 1000 of 1000 links up",
+      "ok: drones table 4038 before, 4038 after: no drone got a new ID",
+      "sent 550,000, stored 437,140: 112,860 lost while it was down, as UDP allows"
+    ]
+  },
+  "kill_gateway": {
+    "passed": true,
+    "limit": "browsers reconnect automatically and resume live updates",
+    "lines": [
+      "ok: banner shown, then gone by itself; the same markers moving and all live"
+    ]
+  },
+  "drop_packets (100 drones, 5% lost)": {
+    "passed": true,
+    "limit": "the loss counter matches the packets dropped; every packet that arrived is stored",
+    "lines": [
+      "ok: dropped 3,004, counted 2,994 (allowed to differ by up to one a drone)",
+      "ok: arrived 56,996, 52 before a first heartbeat, stored 56,944",
+      "0 link losses: three heartbeats lost in a row, which 5% loss does cause now and then"
+    ]
+  },
+  "kill_consumer (100 drones, 570 s)": {
+    "passed": true,
+    "limit": "zero messages lost, zero duplicated, outage under 10 minutes",
+    "lines": [
+      "killed at 10,500 rows, down for 570 s at 1,000 messages a second",
+      "ok: no rows written during the outage",
+      "caught up 25 s after the last message; 0 redelivered rows dropped as duplicates",
+      "ok: 0 publish errors",
+      "ok: 0 frames sent before a drone's first heartbeat",
+      "ok: sent 600,000, stored 600,000: 0 missing"
+    ]
+  }
+}
