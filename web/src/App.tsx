@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { CommandPanel } from "./CommandPanel";
+import { Commands } from "./commands";
 import { Connection, type Status, wsURL } from "./connection";
 import { Drones } from "./drones";
 import { DroneList } from "./DroneList";
 import { DroneMap } from "./DroneMap";
-import type { BBox, DroneState } from "./types";
+import type { BBox, CommandParams, CommandType, CommandUpdate, DroneState } from "./types";
 
 const LIST_EVERY = 10_000; // ms between refreshes of the whole fleet's list
 
@@ -14,6 +16,33 @@ export function App() {
   const store = useRef(new Drones());
   const conn = useRef<Connection | null>(null);
   const area = useRef<BBox | null>(null);
+  const commands = useRef(new Commands());
+  const [user, setUser] = useState("");
+  const [log, setLog] = useState<CommandUpdate[]>([]);
+  const [checked, setChecked] = useState(false); // the login is known
+  const selectedRef = useRef<number | null>(null);
+  selectedRef.current = selected;
+
+  const showLog = useCallback(() => {
+    setLog(selectedRef.current === null ? [] : commands.current.forDrone(selectedRef.current));
+  }, []);
+
+  // A drone's commands from the command service: on selecting it, and after a
+  // reconnect, when statuses may have gone by unseen.
+  const reloadLog = useCallback(
+    async (id: number) => {
+      try {
+        const res = await fetch(`/api/drones/${id}/commands`);
+        if (!res.ok) return;
+        const body = (await res.json()) as { commands: CommandUpdate[] };
+        commands.current.load(body.commands);
+        showLog();
+      } catch {
+        // The gateway is down; the banner shows it.
+      }
+    },
+    [showLog],
+  );
 
   useEffect(() => {
     // Updates arrive up to 4 per second per drone; render at most once per frame.
@@ -27,7 +56,18 @@ export function App() {
     };
 
     const c = new Connection(wsURL(), {
-      status: setStatus,
+      status: (st) => {
+        setStatus(st);
+        if (st === "reconnecting") {
+          commands.current.connectionLost();
+          showLog();
+        }
+        if (st === "open" && selectedRef.current !== null) void reloadLog(selectedRef.current);
+      },
+      commandStatus: (u, requestId) => {
+        commands.current.apply(u, requestId);
+        showLog();
+      },
       snapshot: (ds) => {
         store.current.snapshot(ds);
         render();
@@ -70,21 +110,79 @@ export function App() {
       c.stop();
       conn.current = null;
     };
+  }, [reloadLog, showLog]);
+
+  useEffect(() => {
+    void (async () => {
+      try {
+        const res = await fetch("/api/session");
+        if (res.ok) setUser(((await res.json()) as { user: string }).user);
+      } catch {
+        // The gateway is down: not logged in, as far as this page can tell.
+      }
+      setChecked(true);
+    })();
   }, []);
 
   // The selected drone stays live wherever the map is.
   useEffect(() => {
+    showLog();
     if (selected === null) return;
+    if (user) void reloadLog(selected);
     const c = conn.current;
     c?.subscribe([selected]);
     return () => c?.unsubscribe([selected]);
-  }, [selected]);
+  }, [selected, user, reloadLog, showLog]);
 
   const select = useCallback((id: number) => setSelected(id), []);
   const followArea = useCallback((b: BBox) => {
     area.current = b;
     conn.current?.area(b);
   }, []);
+
+  const send = useCallback(
+    (type: CommandType, params: CommandParams = {}) => {
+      const id = selectedRef.current;
+      if (id === null) return;
+      const requestId = commands.current.start(id, type, user);
+      if (!conn.current?.command(requestId, id, type, params)) {
+        commands.current.notSent(requestId);
+      }
+      showLog();
+    },
+    [user, showLog],
+  );
+
+  const login = useCallback(async (username: string, password: string): Promise<string> => {
+    try {
+      const res = await fetch("/api/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username, password }),
+      });
+      const body = (await res.json()) as { user?: string; error?: string };
+      if (!res.ok || !body.user) return body.error ?? "Could not log in";
+      setUser(body.user);
+      conn.current?.reconnect();
+      return "";
+    } catch {
+      return "Could not reach the gateway";
+    }
+  }, []);
+
+  const logout = useCallback(async () => {
+    try {
+      await fetch("/api/logout", { method: "POST" });
+    } catch {
+      return; // still logged in as far as the gateway knows
+    }
+    setUser("");
+    commands.current.clear();
+    showLog();
+    conn.current?.reconnect();
+  }, [showLog]);
+
+  const drone = drones.find((d) => d.drone_id === selected);
 
   return (
     <div className="app">
@@ -94,7 +192,12 @@ export function App() {
         </div>
       )}
       <DroneList drones={drones} selected={selected} onSelect={select} />
-      <DroneMap drones={drones} selected={selected} onSelect={select} onArea={followArea} />
+      <div className="stage">
+        <DroneMap drones={drones} selected={selected} onSelect={select} onArea={followArea} />
+        {drone && checked && (
+          <CommandPanel key={drone.drone_id} drone={drone} user={user} log={log} onSend={send} onLogin={login} onLogout={logout} />
+        )}
+      </div>
     </div>
   );
 }

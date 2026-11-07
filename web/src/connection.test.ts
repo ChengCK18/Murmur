@@ -154,4 +154,28 @@ describe("Connection", () => {
     expect(sockets.length).toBe(1);
     expect(statuses.at(-1)).toBe("open"); // no "reconnecting" after a deliberate stop
   });
+
+  it("sends a command only on an open socket", () => {
+    expect(conn.command("r1", 1, "arm")).toBe(false);
+    conn.start();
+    expect(conn.command("r1", 1, "arm")).toBe(false);
+    sockets[0].accept();
+    expect(conn.command("r2", 7, "takeoff", { altitude_m: 20 })).toBe(true);
+    expect(sockets[0].sent.at(-1)).toEqual({ type: "command", request_id: "r2", drone_id: 7, command: "takeoff", params: { altitude_m: 20 } });
+  });
+
+  it("reconnects at once for a new login, without showing an outage", () => {
+    conn.subscribe([1]);
+    conn.start();
+    sockets[0].accept();
+    statuses.length = 0;
+    conn.reconnect();
+    expect(sockets).toHaveLength(2);
+    expect(sockets[0].readyState).toBe(3);
+    sockets[1].accept();
+    expect(statuses).toEqual(["open"]);
+    expect(sockets[1].sent).toEqual([{ type: "subscribe", drones: [1] }]);
+    vi.advanceTimersByTime(60_000);
+    expect(sockets).toHaveLength(2);
+  });
 });

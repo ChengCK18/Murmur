@@ -1,4 +1,4 @@
-import type { BBox, DroneState, ServerMessage } from "./types";
+import type { BBox, CommandParams, CommandType, CommandUpdate, DroneState, ServerMessage } from "./types";
 
 export type Status = "connecting" | "open" | "reconnecting";
 
@@ -7,6 +7,7 @@ export interface Handlers {
   update(state: DroneState): void;
   remove(id: number): void;
   status(status: Status): void;
+  commandStatus?(update: CommandUpdate, requestId?: string): void;
   error?(message: string): void;
 }
 
@@ -80,6 +81,22 @@ export class Connection {
     }
   }
 
+  // command sends a command; false if the socket is not open to take it.
+  command(requestId: string, droneId: number, type: CommandType, params: CommandParams = {}): boolean {
+    if (this.socket?.readyState !== OPEN) return false;
+    this.socket.send(JSON.stringify({ type: "command", request_id: requestId, drone_id: droneId, command: type, params }));
+    return true;
+  }
+
+  // reconnect opens a fresh socket at once. The gateway reads the login when a
+  // socket opens, so the page calls this after logging in or out.
+  reconnect(): void {
+    clearTimeout(this.timer);
+    const old = this.socket;
+    this.connect();
+    old?.close();
+  }
+
   private connect(): void {
     const s = this.open(this.url);
     this.socket = s;
@@ -117,6 +134,9 @@ export class Connection {
         break;
       case "remove":
         this.handlers.remove(msg.drone_id);
+        break;
+      case "command_status":
+        this.handlers.commandStatus?.(msg.update, msg.request_id);
         break;
       case "error":
         this.handlers.error?.(msg.message);
