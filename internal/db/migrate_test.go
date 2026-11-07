@@ -2,13 +2,25 @@ package db
 
 import (
 	"context"
+	"io/fs"
 	"slices"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/ChengCK18/murmur/internal/db/dbtest"
+	"github.com/ChengCK18/murmur/migrations"
 )
+
+// all is every migration, in the order they apply.
+func all(t *testing.T) []string {
+	t.Helper()
+	names, err := fs.Glob(migrations.FS, "*.sql")
+	if err != nil || len(names) == 0 {
+		t.Fatalf("migrations: %v, err %v", names, err)
+	}
+	return names
+}
 
 func TestMigrate(t *testing.T) {
 	pool := dbtest.New(t)
@@ -19,8 +31,8 @@ func TestMigrate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !slices.Equal(applied, []string{"0001_telemetry.sql"}) {
-		t.Errorf("applied %v", applied)
+	if !slices.Equal(applied, all(t)) {
+		t.Errorf("applied %v, want %v", applied, all(t))
 	}
 	again, err := Migrate(ctx, pool)
 	if err != nil || len(again) != 0 {
@@ -104,14 +116,19 @@ func TestConcurrentMigrate(t *testing.T) {
 		wg.Go(func() { results[i], errs[i] = Migrate(ctx, pool) })
 	}
 	wg.Wait()
-	total := 0
+	appliers := 0
 	for i := range results {
 		if errs[i] != nil {
 			t.Fatal(errs[i])
 		}
-		total += len(results[i])
+		if len(results[i]) > 0 {
+			appliers++
+			if !slices.Equal(results[i], all(t)) {
+				t.Errorf("applied %v, want %v", results[i], all(t))
+			}
+		}
 	}
-	if total != 1 {
-		t.Errorf("migration applied %d times, want 1: %v", total, results)
+	if appliers != 1 {
+		t.Errorf("%d services applied migrations, want 1: %v", appliers, results)
 	}
 }
