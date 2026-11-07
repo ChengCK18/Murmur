@@ -195,4 +195,26 @@ describe("Connection", () => {
     expect(conn.upload("r2", 1, points, 20)).toBe(true);
     expect(sockets[0].sent.at(-1)).toEqual({ type: "mission_upload", request_id: "r2", drone_id: 1, waypoints: points, altitude_m: 20 });
   });
+
+  it("passes on alerts and geofence changes", () => {
+    const got: unknown[] = [];
+    const c = new Connection("ws://test/ws", {
+      status: () => {},
+      snapshot: () => {},
+      update: () => {},
+      remove: () => {},
+      alert: (a) => got.push(a),
+      geofence: (f) => got.push(f),
+    }, () => {
+      const s = new FakeSocket();
+      sockets.push(s);
+      return s;
+    });
+    c.start();
+    const s = sockets.at(-1)!;
+    s.accept();
+    s.receive({ type: "alert", alert: { drone_id: 1, kind: "link_lost", raised: true, message: "", at: "" } });
+    s.receive({ type: "geofence", fence: { polygon: [] } });
+    expect(got).toEqual([{ drone_id: 1, kind: "link_lost", raised: true, message: "", at: "" }, { polygon: [] }]);
+  });
 });

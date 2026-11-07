@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { AlertList } from "./AlertList";
+import { Alerts } from "./alerts";
 import { CommandPanel } from "./CommandPanel";
 import { Commands, type FleetView } from "./commands";
 import { Connection, type Status, wsURL } from "./connection";
@@ -6,7 +8,7 @@ import { Drones } from "./drones";
 import { DroneList } from "./DroneList";
 import { DroneMap } from "./DroneMap";
 import { FleetBar } from "./FleetBar";
-import type { BBox, CommandParams, CommandType, CommandUpdate, DroneState, Mission, Waypoint } from "./types";
+import type { Alert, BBox, CommandParams, CommandType, CommandUpdate, DroneState, Fence, Mission, Waypoint } from "./types";
 
 const LIST_EVERY = 10_000; // ms between refreshes of the whole fleet's list
 
@@ -25,6 +27,11 @@ export function App() {
   selectedRef.current = selected;
 
   const [mission, setMission] = useState<Mission | null>(null);
+  const alertStore = useRef(new Alerts());
+  const [alerts, setAlerts] = useState<Alert[]>([]);
+  const [alerted, setAlerted] = useState<Set<number>>(new Set());
+  const [fence, setFence] = useState<Waypoint[]>([]);
+  const [drawing, setDrawing] = useState<Waypoint[] | null>(null);
   const [plan, setPlan] = useState<Waypoint[]>([]);
   const [planning, setPlanning] = useState(false);
   const [fleet, setFleet] = useState<FleetView | null>(null);
@@ -70,6 +77,24 @@ export function App() {
     [showLog],
   );
 
+  const showAlerts = useCallback(() => {
+    setAlerts(alertStore.current.list());
+    setAlerted(alertStore.current.drones());
+  }, []);
+
+  // Alerts and the geofence from the alerter: at start and after a reconnect,
+  // since both travel on core NATS and any sent meanwhile went by unseen.
+  const reloadAlerts = useCallback(async () => {
+    try {
+      const [a, f] = await Promise.all([fetch("/api/alerts"), fetch("/api/geofence")]);
+      if (a.ok) alertStore.current.load((await a.json()) as Alert[]);
+      if (f.ok) setFence(((await f.json()) as Fence).polygon ?? []);
+      showAlerts();
+    } catch {
+      // The gateway is down; the banner shows it.
+    }
+  }, [showAlerts]);
+
   const reloadMission = useCallback(async (id: number) => {
     try {
       const res = await fetch(`/api/drones/${id}/mission`);
@@ -102,8 +127,14 @@ export function App() {
         if (st === "open") {
           if (selectedRef.current !== null) void reloadLog(selectedRef.current);
           void reloadFleet();
+          void reloadAlerts();
         }
       },
+      alert: (a) => {
+        alertStore.current.apply(a);
+        showAlerts();
+      },
+      geofence: (f) => setFence(f.polygon ?? []),
       fleetStarted: (started) => {
         const f = latestFleet.current;
         if (!f || f.requestId !== started.request_id) return;
@@ -161,7 +192,7 @@ export function App() {
       c.stop();
       conn.current = null;
     };
-  }, [reloadLog, reloadFleet, reloadMission, showLog]);
+  }, [reloadLog, reloadFleet, reloadMission, reloadAlerts, showAlerts, showLog]);
 
   useEffect(() => {
     void (async () => {
@@ -223,7 +254,34 @@ export function App() {
     [user, plan, showLog],
   );
 
-  const addWaypoint = useCallback((w: Waypoint) => setPlan((p) => [...p, w]), []);
+  const drawingRef = useRef(drawing);
+  drawingRef.current = drawing;
+  const addWaypoint = useCallback((w: Waypoint) => {
+    if (drawingRef.current) setDrawing((d) => [...(d ?? []), w]);
+    else setPlan((p) => [...p, w]);
+  }, []);
+
+  const draw = useCallback((on: boolean) => {
+    setDrawing(on ? [] : null);
+    if (on) setPlanning(false);
+  }, []);
+
+  const saveFence = useCallback(async (polygon: Waypoint[]): Promise<string> => {
+    try {
+      const res = await fetch("/api/geofence", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ polygon }),
+      });
+      const body = (await res.json()) as { fence?: Fence; error?: string };
+      if (!res.ok || body.error) return body.error ?? "Could not save the geofence";
+      setFence(body.fence?.polygon ?? []);
+      setDrawing(null);
+      return "";
+    } catch {
+      return "Could not reach the gateway";
+    }
+  }, []);
   const clearPlan = useCallback(() => setPlan([]), []);
 
   const sendFleet = useCallback(
@@ -279,7 +337,18 @@ export function App() {
         </div>
       )}
       <DroneList drones={drones} selected={selected} onSelect={select}>
-        {user && <FleetBar live={drones.filter((d) => d.link === "ok").length} view={fleet} onSend={sendFleet} />}
+        <AlertList alerts={alerts} onSelect={select} />
+        {user && (
+          <FleetBar
+            live={drones.filter((d) => d.link === "ok").length}
+            view={fleet}
+            onSend={sendFleet}
+            fence={fence}
+            drawing={drawing}
+            onDraw={draw}
+            onSaveFence={saveFence}
+          />
+        )}
       </DroneList>
       <div className="stage">
         <DroneMap
@@ -288,8 +357,10 @@ export function App() {
           onSelect={select}
           onArea={followArea}
           route={plan.length > 0 || planning ? plan : (mission?.waypoints ?? [])}
-          planning={planning}
+          fence={drawing ?? fence}
+          planning={planning || drawing !== null}
           onPick={addWaypoint}
+          alerted={alerted}
         />
         {drone && checked && (
           <CommandPanel

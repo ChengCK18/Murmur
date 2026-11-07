@@ -1,4 +1,4 @@
-import type { BBox, CommandParams, CommandType, CommandUpdate, DroneState, ServerMessage, Waypoint } from "./types";
+import type { Alert, BBox, CommandParams, CommandType, CommandUpdate, DroneState, Fence, ServerMessage, Waypoint } from "./types";
 
 export type Status = "connecting" | "open" | "reconnecting";
 
@@ -9,6 +9,8 @@ export interface Handlers {
   status(status: Status): void;
   commandStatus?(update: CommandUpdate, requestId?: string): void;
   fleetStarted?(started: { fleet_id?: string; count: number; error?: string; request_id?: string }): void;
+  alert?(alert: Alert): void;
+  geofence?(fence: Fence): void;
   error?(message: string): void;
 }
 
@@ -158,6 +160,12 @@ export class Connection {
         break;
       case "fleet_started":
         this.handlers.fleetStarted?.(msg);
+        break;
+      case "alert":
+        this.handlers.alert?.(msg.alert);
+        break;
+      case "geofence":
+        this.handlers.geofence?.(msg.fence);
         break;
       case "error":
         this.handlers.error?.(msg.message);

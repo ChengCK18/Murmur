@@ -159,3 +159,31 @@ test("a mission is planned on the map, uploaded and flown", async ({ page }) => 
     return Math.hypot(lat - start[0], lon - start[1]);
   }, { timeout: 15_000 }).toBeGreaterThan(0.0001);
 });
+
+test("alerts show for a geofence breach and a lost link, and clear", async ({ page }) => {
+  await selectADrone(page);
+  await logIn(page);
+  const alerts = page.getByRole("region", { name: "Alerts" });
+
+  // A small triangle in a corner of the map, which no drone is inside.
+  await page.getByRole("button", { name: "Draw geofence" }).click();
+  const box = (await page.locator(".maplibregl-canvas").boundingBox())!;
+  for (const [x, y] of [[0.05, 0.9], [0.1, 0.9], [0.07, 0.95]]) {
+    await page.mouse.click(box.x + box.width * x, box.y + box.height * y);
+  }
+  await page.getByRole("button", { name: "Save geofence" }).click();
+  await expect(page.locator(".map")).toHaveAttribute("data-fence-points", "3");
+  try {
+    await expect(alerts.locator('li[data-kind="geofence"]')).toHaveCount(DRONES, { timeout: 10_000 });
+    await expect(page.locator(".drone.alert")).toHaveCount(DRONES);
+  } finally {
+    await page.getByRole("button", { name: "Remove geofence" }).click();
+  }
+  await expect(alerts.locator('li[data-kind="geofence"]')).toHaveCount(0, { timeout: 10_000 });
+
+  // The fleet goes quiet: link lost for every drone, cleared when it returns.
+  execSync(`${compose} stop fakegen`, { stdio: "inherit" });
+  await expect(alerts.locator('li[data-kind="link_lost"]')).toHaveCount(DRONES, { timeout: 15_000 });
+  execSync(`${compose} start fakegen`, { stdio: "inherit" });
+  await expect(alerts.locator('li[data-kind="link_lost"]')).toHaveCount(0, { timeout: 30_000 });
+});

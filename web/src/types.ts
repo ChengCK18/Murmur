@@ -67,6 +67,20 @@ export interface Mission {
   status: "uploading" | "uploaded" | "failed";
 }
 
+// An alert from the alerter (internal/alert.Alert in Go).
+export interface Alert {
+  drone_id: number;
+  kind: "low_battery" | "link_lost" | "geofence";
+  raised: boolean;
+  message: string;
+  at: string;
+}
+
+export interface Fence {
+  polygon: Waypoint[];
+  updated_by?: string;
+}
+
 // A map area in degrees: west, south, east, north.
 export type BBox = [number, number, number, number];
 
@@ -77,4 +91,6 @@ export type ServerMessage =
   | { type: "remove"; drone_id: number } // silent for the gateway's -stale (10 min)
   | { type: "command_status"; request_id?: string; update: CommandUpdate }
   | { type: "fleet_started"; request_id?: string; fleet_id?: string; count: number; error?: string }
+  | { type: "alert"; alert: Alert }
+  | { type: "geofence"; fence: Fence }
   | { type: "error"; message: string };

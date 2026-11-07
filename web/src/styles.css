@@ -86,3 +86,14 @@ html, body, #root { margin: 0; height: 100%; font: 14px/1.4 system-ui, sans-seri
   width: 20px; height: 20px; border-radius: 50%; background: #d97706; color: #fff; border: 2px solid #fff;
   font-size: 11px; font-weight: 600; line-height: 16px; text-align: center; box-shadow: 0 1px 3px rgb(0 0 0 / 0.4);
 }
+
+.alerts { border-bottom: 1px solid #d0d7de; background: #fff5f5; max-height: 30vh; overflow-y: auto; }
+.alerts h2 { font-size: 13px; margin: 0; padding: 8px 14px; color: #a40e26; }
+.alerts ul { list-style: none; margin: 0; padding: 0 0 6px; }
+.alerts li { display: grid; grid-template-columns: 1fr auto; padding: 3px 14px; cursor: pointer; font-size: 13px; }
+.alerts li:hover { background: #ffebe9; }
+.alerts .when { color: #57606a; font-size: 12px; font-variant-numeric: tabular-nums; }
+.alerts .msg { grid-column: 1 / -1; color: #57606a; font-size: 12px; }
+.drone.alert .arrow { stroke: #cf222e; stroke-width: 3; }
+.fleet .fence { margin-top: 8px; }
+.fleet .hint { color: #57606a; font-size: 12px; margin: 6px 0 0; }

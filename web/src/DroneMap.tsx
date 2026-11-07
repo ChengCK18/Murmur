@@ -21,17 +21,20 @@ interface Props {
   onSelect(id: number): void;
   onArea(bbox: BBox): void;
   route: Waypoint[]; // the mission being planned, or the one the drone holds
-  planning: boolean; // clicks on the map add waypoints
+  fence: Waypoint[]; // the geofence, or the one being drawn
+  planning: boolean; // clicks on the map add points
   onPick(p: Waypoint): void;
+  alerted: Set<number>; // drones with an alert
 }
 
 const ROUTE = "mission-route";
+const FENCE = "geofence";
 
 // DroneMap draws one marker per drone with a position: an arrow turned to
 // the heading, labelled with altitude and battery, grey once the link is lost.
 // It reports the area it shows whenever that changes, so the page follows only
 // the drones on screen.
-export function DroneMap({ drones, selected, onSelect, onArea, route, planning, onPick }: Props) {
+export function DroneMap({ drones, selected, onSelect, onArea, route, fence, planning, onPick, alerted }: Props) {
   const container = useRef<HTMLDivElement>(null);
   const map = useRef<MapLibreMap | null>(null);
   const markers = useRef(new Map<number, Marker>());
@@ -41,6 +44,8 @@ export function DroneMap({ drones, selected, onSelect, onArea, route, planning, 
   const points = useRef<Marker[]>([]);
   const routeRef = useRef(route);
   routeRef.current = route;
+  const fenceRef = useRef(fence);
+  fenceRef.current = fence;
   const pick = useRef<((p: Waypoint) => void) | null>(null);
   pick.current = planning ? onPick : null;
 
@@ -49,6 +54,9 @@ export function DroneMap({ drones, selected, onSelect, onArea, route, planning, 
     map.current = m;
     m.on("click", (e) => pick.current?.({ lat: e.lngLat.lat, lon: e.lngLat.lng }));
     m.on("load", () => {
+      m.addSource(FENCE, { type: "geojson", data: fenceArea(fenceRef.current) });
+      m.addLayer({ id: `${FENCE}-fill`, type: "fill", source: FENCE, paint: { "fill-color": "#1f6feb", "fill-opacity": 0.06 } });
+      m.addLayer({ id: `${FENCE}-line`, type: "line", source: FENCE, paint: { "line-color": "#1f6feb", "line-width": 2 } });
       m.addSource(ROUTE, { type: "geojson", data: routeLine(routeRef.current) });
       m.addLayer({ id: ROUTE, type: "line", source: ROUTE, paint: { "line-color": "#d97706", "line-width": 3, "line-dasharray": [2, 1] } });
     });
@@ -83,6 +91,7 @@ export function DroneMap({ drones, selected, onSelect, onArea, route, planning, 
       }
       // A thousand drones change a few at a time: leave the others alone.
       const changed = drawnSelected.current !== selected && (d.drone_id === selected || d.drone_id === drawnSelected.current);
+      mk.getElement().classList.toggle("alert", alerted.has(d.drone_id));
       if (drawn.current.get(d.drone_id) !== d || changed) {
         mk.setLngLat(at);
         paint(mk.getElement(), d, d.drone_id === selected);
@@ -102,7 +111,7 @@ export function DroneMap({ drones, selected, onSelect, onArea, route, planning, 
       fitted.current = true;
       m.fitBounds(bounds, { padding: 80, maxZoom: 16, duration: 0 });
     }
-  }, [drones, selected, onSelect]);
+  }, [drones, selected, onSelect, alerted]);
 
   // The route: a numbered marker per waypoint, joined by a line.
   useEffect(() => {
@@ -119,6 +128,12 @@ export function DroneMap({ drones, selected, onSelect, onArea, route, planning, 
   }, [route]);
 
   useEffect(() => {
+    const m = map.current;
+    (m?.getSource(FENCE) as GeoJSONSource | undefined)?.setData(fenceArea(fence));
+    if (container.current) container.current.dataset.fencePoints = String(fence.length);
+  }, [fence]);
+
+  useEffect(() => {
     map.current?.getCanvas().classList.toggle("planning", planning);
   }, [planning]);
 
@@ -132,6 +147,12 @@ export function DroneMap({ drones, selected, onSelect, onArea, route, planning, 
   }, [selected]);
 
   return <div ref={container} className="map" />;
+}
+
+function fenceArea(fence: Waypoint[]): Parameters<GeoJSONSource["setData"]>[0] {
+  if (fence.length < 3) return routeLine(fence);
+  const ring = [...fence, fence[0]].map((w) => [w.lon, w.lat]);
+  return { type: "Feature", properties: {}, geometry: { type: "Polygon", coordinates: [ring] } };
 }
 
 function routeLine(route: Waypoint[]): Parameters<GeoJSONSource["setData"]>[0] {
