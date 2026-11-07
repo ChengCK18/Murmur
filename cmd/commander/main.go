@@ -110,6 +110,22 @@ func run(ctx context.Context, natsURL, dbURL, redisAddr string, tenant int64, me
 	}); err != nil {
 		return err
 	}
+	if _, err := nc.Subscribe(command.FleetSubject, func(m *nats.Msg) {
+		var req command.FleetRequest
+		started := command.FleetStarted{Error: "bad request"}
+		if err := json.Unmarshal(m.Data, &req); err == nil {
+			started = s.submitFleet(ctx, req)
+		}
+		data, err := json.Marshal(started)
+		if err == nil {
+			err = m.Respond(data)
+		}
+		if err != nil {
+			log.Printf("answering a fleet request: %v", err)
+		}
+	}); err != nil {
+		return err
+	}
 	if _, err := nc.Subscribe(command.RecentSubject, func(m *nats.Msg) {
 		go recent(ctx, st, m)
 	}); err != nil {
@@ -142,7 +158,13 @@ func recent(ctx context.Context, st pgStore, m *nats.Msg) {
 		log.Printf("bad request for recent commands: %v", err)
 		return
 	}
-	us, err := st.recent(ctx, req.DroneID, min(max(req.Limit, 1), 100))
+	var us []command.Update
+	var err error
+	if req.FleetID != "" {
+		us, err = st.fleet(ctx, req.FleetID)
+	} else {
+		us, err = st.recent(ctx, req.DroneID, min(max(req.Limit, 1), 100))
+	}
 	if err != nil {
 		log.Print(err)
 		return // the gateway's request times out and it reports that

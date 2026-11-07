@@ -8,11 +8,14 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/nats-io/nats.go"
+	"github.com/redis/go-redis/v9"
 
 	"github.com/ChengCK18/murmur/internal/bus/natstest"
 	"github.com/ChengCK18/murmur/internal/command"
@@ -169,4 +172,109 @@ func TestCommandsReachASITLDrone(t *testing.T) {
 		t.Fatalf("arm after the restart: %+v", u)
 	}
 	waitFor(t, ctx, "a heartbeat showing armed again", func() bool { return armed.Load() == 1 })
+}
+
+// TestFleetCommandEndsForEveryDrone sends return to launch to 20 fake drones
+// that lose and reject some commands, and checks the plan's limit: every drone
+// shows a final status within 5 seconds.
+func TestFleetCommandEndsForEveryDrone(t *testing.T) {
+	const drones = 20
+	bin := build(t, "ingester", "commander", "consumer", "fakegen")
+	natsURL := natstest.Start(t)
+	_, dbURL := dbtest.NewURL(t)
+	redisURL, _ := spareRedis(t)
+	udp := freeUDPPort(t)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+
+	start(t, bin, "ingester", "-listen", udp, "-nats", natsURL, "-db", dbURL, "-metrics", "", "-interval", "1h")
+	start(t, bin, "consumer", "-nats", natsURL, "-db", dbURL, "-redis", redisURL, "-metrics", "", "-interval", "1h")
+	start(t, bin, "commander", "-nats", natsURL, "-db", dbURL, "-redis", redisURL, "-metrics", "")
+	time.Sleep(time.Second) // listening, and the tables created
+	start(t, bin, "fakegen", "-count", strconv.Itoa(drones), "-target", udp, "-command-drop", "0.3", "-command-reject", "0.2")
+
+	nc, err := nats.Connect(natsURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer nc.Close()
+
+	// Wait until the commander can see every drone flying.
+	rdb := redis.NewClient(mustRedisOptions(t, redisURL))
+	defer rdb.Close()
+	waitFor(t, ctx, "every drone's state", func() bool {
+		keys, err := rdb.Keys(ctx, "drone:1:*").Result()
+		if err != nil || len(keys) != drones {
+			return false
+		}
+		for _, k := range keys {
+			if n, err := rdb.HExists(ctx, k, "GLOBAL_POSITION_INT").Result(); err != nil || !n {
+				return false
+			}
+		}
+		return true
+	})
+	var ids []int64
+	keys, _ := rdb.Keys(ctx, "drone:1:*").Result()
+	for _, k := range keys {
+		id, err := strconv.ParseInt(strings.TrimPrefix(k, "drone:1:"), 10, 64)
+		if err != nil {
+			t.Fatal(err)
+		}
+		ids = append(ids, id)
+	}
+
+	finals := make(chan command.Update, drones*2)
+	if _, err := nc.Subscribe(command.StatusSubjects, func(m *nats.Msg) {
+		var u command.Update
+		if json.Unmarshal(m.Data, &u) == nil && command.Final(u.Status) {
+			finals <- u
+		}
+	}); err != nil {
+		t.Fatal(err)
+	}
+	nc.Flush() //nolint:errcheck
+
+	data, _ := json.Marshal(command.FleetRequest{DroneIDs: ids, Type: command.ReturnHome, IssuedBy: "integration"})
+	at := time.Now()
+	m, err := nc.Request(command.FleetSubject, data, 2*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var started command.FleetStarted
+	if err := json.Unmarshal(m.Data, &started); err != nil || started.Error != "" || started.Count != drones {
+		t.Fatalf("started %+v, err %v", started, err)
+	}
+
+	got := map[int64]string{}
+	totals := map[string]int{}
+	for len(got) < drones {
+		select {
+		case u := <-finals:
+			if u.FleetID != started.FleetID {
+				t.Errorf("wrong fleet: %+v", u)
+			}
+			if _, dup := got[u.DroneID]; dup {
+				t.Errorf("two final statuses for drone %d", u.DroneID)
+			}
+			got[u.DroneID] = u.Status
+			totals[u.Status]++
+		case <-time.After(time.Until(at.Add(command.Lifetime + time.Second))):
+			t.Fatalf("after %v only %d of %d final: %v", time.Since(at), len(got), drones, totals)
+		}
+	}
+	took := time.Since(at)
+	t.Logf("%d drones final in %v: %v", drones, took, totals)
+	if took > command.Lifetime {
+		t.Errorf("took %v, limit %v", took, command.Lifetime)
+	}
+}
+
+func mustRedisOptions(t *testing.T, url string) *redis.Options {
+	t.Helper()
+	o, err := redis.ParseURL(url)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return o
 }

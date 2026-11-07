@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -13,7 +14,7 @@ import (
 	"github.com/ChengCK18/murmur/internal/command"
 )
 
-var fast = timing{sent: 40 * time.Millisecond, ack: 60 * time.Millisecond, progress: 200 * time.Millisecond, attempts: 3, lifetime: 500 * time.Millisecond}
+var fast = timing{sent: 40 * time.Millisecond, ack: 60 * time.Millisecond, progress: 200 * time.Millisecond, attempts: 3, lifetime: 500 * time.Millisecond, spread: 30 * time.Millisecond}
 
 // harness plays the ingester and the drone.
 type harness struct {
@@ -345,5 +346,130 @@ func TestUUID(t *testing.T) {
 	}
 	if len(id) != 36 || id[14] != '4' || id[8] != '-' {
 		t.Errorf("id %q", id)
+	}
+}
+
+func fleetReq(ids ...int64) command.FleetRequest {
+	return command.FleetRequest{DroneIDs: ids, Type: command.Land, IssuedBy: "demo"}
+}
+
+func TestFleetTracksEachDroneOnItsOwn(t *testing.T) {
+	h := newHarness(t, fast)
+	h.onSend = func(c command.Command) {
+		h.s.reply(sentReply(c))
+		switch c.DroneID {
+		case 1:
+			h.s.reply(ack(c, ardupilotmega.MAV_RESULT_ACCEPTED))
+		case 2:
+			h.s.reply(ack(c, ardupilotmega.MAV_RESULT_DENIED))
+		} // drone 3 stays silent
+	}
+	start := h.s.submitFleet(context.Background(), fleetReq(3, 1, 2, 2))
+	if start.FleetID == "" || start.Count != 3 || start.Error != "" {
+		t.Fatalf("%+v", start)
+	}
+	h.final()
+	got := map[int64]string{}
+	for _, u := range h.statuses {
+		if u.FleetID != start.FleetID {
+			t.Errorf("status without the fleet ID: %+v", u)
+		}
+		if command.Final(u.Status) {
+			got[u.DroneID] = u.Status
+		}
+	}
+	want := map[int64]string{1: command.Accepted, 2: command.Rejected, 3: command.TimedOut}
+	for id, status := range want {
+		if got[id] != status {
+			t.Errorf("drone %d: %q, want %q", id, got[id], status)
+		}
+	}
+}
+
+func TestFleetSpreadsItsSends(t *testing.T) {
+	tm := fast
+	tm.spread = 100 * time.Millisecond
+	h := newHarness(t, tm)
+	var mu sync.Mutex
+	var at []time.Time
+	h.onSend = func(c command.Command) {
+		mu.Lock()
+		at = append(at, time.Now())
+		mu.Unlock()
+		h.s.reply(sentReply(c))
+		h.s.reply(ack(c, ardupilotmega.MAV_RESULT_ACCEPTED))
+	}
+	h.s.submitFleet(context.Background(), fleetReq(1, 2, 3, 4, 5, 6, 7, 8, 9, 10))
+	h.final()
+	if len(at) != 10 {
+		t.Fatalf("%d sends", len(at))
+	}
+	slices.SortFunc(at, time.Time.Compare)
+	if took := at[9].Sub(at[0]); took < 60*time.Millisecond {
+		t.Errorf("all sends within %v: a burst", took)
+	}
+}
+
+func TestFleetStillReportsAPreconditionPerDrone(t *testing.T) {
+	h := newHarness(t, fast)
+	h.s.check = func(_ context.Context, r command.Request) string {
+		if r.DroneID == 2 {
+			return "Land needs the drone armed and flying"
+		}
+		return ""
+	}
+	h.onSend = func(c command.Command) {
+		h.s.reply(sentReply(c))
+		h.s.reply(ack(c, ardupilotmega.MAV_RESULT_ACCEPTED))
+	}
+	h.s.submitFleet(context.Background(), fleetReq(1, 2))
+	h.final()
+	got := map[int64]string{}
+	for _, u := range h.statuses {
+		if command.Final(u.Status) {
+			got[u.DroneID] = u.Status
+		}
+	}
+	if got[1] != command.Accepted || got[2] != command.Rejected {
+		t.Errorf("%v", got)
+	}
+}
+
+func TestFleetRefusedWhole(t *testing.T) {
+	huge := make([]int64, command.MaxFleet+1)
+	for i := range huge {
+		huge[i] = int64(i)
+	}
+	cases := map[string]command.FleetRequest{
+		"no drones": fleetReq(),
+		"too many":  fleetReq(huge...),
+		"no user":   {DroneIDs: []int64{1}, Type: command.Land},
+		"bad type":  {DroneIDs: []int64{1}, Type: "self_destruct", IssuedBy: "demo"},
+	}
+	for name, req := range cases {
+		t.Run(name, func(t *testing.T) {
+			h := newHarness(t, fast)
+			if s := h.s.submitFleet(context.Background(), req); s.Error == "" || s.FleetID != "" {
+				t.Errorf("%+v", s)
+			}
+			if len(h.sends()) != 0 {
+				t.Error("it was sent")
+			}
+		})
+	}
+}
+
+func TestFleetTellsOfACommandThatCouldNotBeRecorded(t *testing.T) {
+	h := newHarness(t, fast)
+	h.failDB = true
+	start := h.s.submitFleet(context.Background(), fleetReq(1, 2))
+	h.final()
+	if len(h.statuses) != start.Count {
+		t.Errorf("%d statuses for %d drones", len(h.statuses), start.Count)
+	}
+	for _, u := range h.statuses {
+		if u.Status != command.Rejected || u.FleetID != start.FleetID {
+			t.Errorf("%+v", u)
+		}
 	}
 }

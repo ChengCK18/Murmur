@@ -25,6 +25,10 @@ const (
 	// RequestSubject is where the gateway sends a Request, by NATS request and
 	// reply. The answer is the first Update.
 	RequestSubject = "command_request"
+	// FleetSubject is where the gateway sends a FleetRequest, by NATS request
+	// and reply. The answer is a FleetStarted; each drone's statuses then follow
+	// on its own command_status subject.
+	FleetSubject = "command_fleet"
 	// RecentSubject answers a RecentRequest with a drone's latest commands, so
 	// a reconnected browser can show them again.
 	RecentSubject = "command_recent"
@@ -35,6 +39,8 @@ const (
 	// StatusSubjects is what the gateway subscribes to.
 	StatusSubjects = "command_status.*"
 
+	// MaxFleet is the most drones one fleet command can go to.
+	MaxFleet = 1000
 	// Lifetime is how long a command may still be carried out.
 	Lifetime = 5 * time.Second
 	// SenderSystem and SenderComponent identify the platform to a drone as a
@@ -93,17 +99,38 @@ type Request struct {
 	Type     string `json:"type"`
 	Params   Params `json:"params"`
 	IssuedBy string `json:"issued_by"`
+	FleetID  string `json:"fleet_id,omitempty"` // set by the commander
 }
 
-// RecentRequest asks for a drone's latest commands, newest first.
+// FleetRequest is one command to several drones. Each drone's command is
+// tracked on its own.
+type FleetRequest struct {
+	DroneIDs []int64 `json:"drone_ids"`
+	Type     string  `json:"type"`
+	Params   Params  `json:"params"`
+	IssuedBy string  `json:"issued_by"`
+}
+
+// FleetStarted answers a FleetRequest. Count is the number of drones whose
+// status will follow; if Error is set, none will.
+type FleetStarted struct {
+	FleetID string `json:"fleet_id,omitempty"`
+	Count   int    `json:"count"`
+	Error   string `json:"error,omitempty"`
+}
+
+// RecentRequest asks for a drone's latest commands, newest first, or for every
+// command of a fleet command if FleetID is set.
 type RecentRequest struct {
-	DroneID int64 `json:"drone_id"`
-	Limit   int   `json:"limit"`
+	DroneID int64  `json:"drone_id,omitempty"`
+	FleetID string `json:"fleet_id,omitempty"`
+	Limit   int    `json:"limit"`
 }
 
 // Command is the message on command.<drone_id>.
 type Command struct {
 	CommandID string    `json:"command_id"`
+	FleetID   string    `json:"fleet_id,omitempty"`
 	DroneID   int64     `json:"drone_id"`
 	Type      string    `json:"type"`
 	Params    Params    `json:"params"`
@@ -134,6 +161,7 @@ type Reply struct {
 // Update is the message on command_status.<drone_id>.
 type Update struct {
 	CommandID string    `json:"command_id,omitempty"` // empty if refused before it had one
+	FleetID   string    `json:"fleet_id,omitempty"`
 	DroneID   int64     `json:"drone_id"`
 	Type      string    `json:"type"`
 	Status    string    `json:"status"`

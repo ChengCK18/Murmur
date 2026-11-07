@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"slices"
 	"sync"
 	"time"
 
@@ -23,6 +24,7 @@ type timing struct {
 	progress time.Duration // how long IN_PROGRESS holds a command open
 	attempts int
 	lifetime time.Duration
+	spread   time.Duration // a fleet command's sends take this long
 }
 
 var planTiming = timing{
@@ -31,6 +33,7 @@ var planTiming = timing{
 	progress: 5 * time.Second,
 	attempts: 3,
 	lifetime: command.Lifetime,
+	spread:   100 * time.Millisecond,
 }
 
 // store is the audit log. A command is written before it is sent, so nothing
@@ -77,11 +80,11 @@ func newService(publish func(string, []byte) error, s store, t timing) *service 
 // comes back rejected, with the reason, and never reaches the drone.
 func (s *service) submit(ctx context.Context, req command.Request) command.Update {
 	now := s.now()
-	c := command.Command{DroneID: req.DroneID, Type: req.Type, Params: req.Params, IssuedBy: req.IssuedBy,
+	c := command.Command{FleetID: req.FleetID, DroneID: req.DroneID, Type: req.Type, Params: req.Params, IssuedBy: req.IssuedBy,
 		IssuedAt: now, ExpiresAt: now.Add(s.timing.lifetime)}
 	refuse := func(reason string) command.Update {
 		s.count(command.Rejected)
-		return command.Update{DroneID: c.DroneID, Type: c.Type, Status: command.Rejected, Reason: reason, IssuedBy: c.IssuedBy, At: now}
+		return command.Update{FleetID: c.FleetID, DroneID: c.DroneID, Type: c.Type, Status: command.Rejected, Reason: reason, IssuedBy: c.IssuedBy, At: now}
 	}
 	if req.IssuedBy == "" {
 		return refuse("no user")
@@ -117,6 +120,41 @@ func (s *service) submit(ctx context.Context, req command.Request) command.Updat
 		s.count(u.Status)
 	})
 	return s.update(c, command.Pending, "", 0, nil)
+}
+
+// submitFleet starts one command per drone, spread over spread so a big fleet
+// command does not reach the ingester as one burst. It returns at once; each
+// drone's statuses follow on their own.
+func (s *service) submitFleet(ctx context.Context, req command.FleetRequest) command.FleetStarted {
+	switch {
+	case req.IssuedBy == "":
+		return command.FleetStarted{Error: "no user"}
+	case len(req.DroneIDs) == 0:
+		return command.FleetStarted{Error: "no drones"}
+	case len(req.DroneIDs) > command.MaxFleet:
+		return command.FleetStarted{Error: fmt.Sprintf("a fleet command can go to %d drones at most", command.MaxFleet)}
+	}
+	if err := command.Validate(req.Type, req.Params); err != nil {
+		return command.FleetStarted{Error: err.Error()}
+	}
+	id, err := newID()
+	if err != nil {
+		return command.FleetStarted{Error: "could not start the command"}
+	}
+	ids := slices.Compact(slices.Sorted(slices.Values(req.DroneIDs)))
+	s.wg.Go(func() {
+		gap := s.timing.spread / time.Duration(len(ids))
+		for _, drone := range ids {
+			s.wg.Go(func() {
+				u := s.submit(ctx, command.Request{DroneID: drone, Type: req.Type, Params: req.Params, IssuedBy: req.IssuedBy, FleetID: id})
+				if u.CommandID == "" {
+					s.tell(u) // refused before it had an ID: nothing else reports it
+				}
+			})
+			time.Sleep(gap)
+		}
+	})
+	return command.FleetStarted{FleetID: id, Count: len(ids)}
 }
 
 // refused records a command turned away, so the log has it too.
@@ -273,7 +311,7 @@ func (s *service) send(c command.Command) error {
 }
 
 func (s *service) update(c command.Command, status, reason string, attempts int, result *uint8) command.Update {
-	return command.Update{CommandID: c.CommandID, DroneID: c.DroneID, Type: c.Type, Status: status, Reason: reason,
+	return command.Update{CommandID: c.CommandID, FleetID: c.FleetID, DroneID: c.DroneID, Type: c.Type, Status: status, Reason: reason,
 		Attempts: attempts, MavResult: result, IssuedBy: c.IssuedBy, At: s.now()}
 }
 

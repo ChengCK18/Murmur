@@ -23,9 +23,9 @@ func (s pgStore) insert(ctx context.Context, c command.Command, status, reason s
 		return err
 	}
 	_, err = s.pool.Exec(ctx, `INSERT INTO commands
-		(id, tenant_id, drone_id, type, params, issued_by, issued_at, expires_at, status, reason, updated_at)
-		VALUES ($1::uuid, $2, $3, $4, $5::jsonb, $6, $7, $8, $9, NULLIF($10, ''), $7)`,
-		c.CommandID, s.tenant, c.DroneID, c.Type, string(params), c.IssuedBy, c.IssuedAt, c.ExpiresAt, status, reason)
+		(id, tenant_id, drone_id, type, params, issued_by, issued_at, expires_at, status, reason, updated_at, fleet_id)
+		VALUES ($1::uuid, $2, $3, $4, $5::jsonb, $6, $7, $8, $9, NULLIF($10, ''), $7, NULLIF($11, '')::uuid)`,
+		c.CommandID, s.tenant, c.DroneID, c.Type, string(params), c.IssuedBy, c.IssuedAt, c.ExpiresAt, status, reason, c.FleetID)
 	if err != nil {
 		return fmt.Errorf("commands insert: %w", err)
 	}
@@ -67,12 +67,22 @@ func (s pgStore) recent(ctx context.Context, droneID int64, limit int) ([]comman
 	return pgx.CollectRows(rows, scanUpdate)
 }
 
-const updateColumns = `id::text, drone_id, type, status, COALESCE(reason, ''), attempts, mav_result, issued_by, updated_at`
+// fleet returns every command of a fleet command.
+func (s pgStore) fleet(ctx context.Context, fleetID string) ([]command.Update, error) {
+	rows, err := s.pool.Query(ctx, `SELECT `+updateColumns+` FROM commands
+		WHERE fleet_id = $1::uuid ORDER BY drone_id`, fleetID)
+	if err != nil {
+		return nil, fmt.Errorf("commands fleet: %w", err)
+	}
+	return pgx.CollectRows(rows, scanUpdate)
+}
+
+const updateColumns = `id::text, COALESCE(fleet_id::text, ''), drone_id, type, status, COALESCE(reason, ''), attempts, mav_result, issued_by, updated_at`
 
 func scanUpdate(row pgx.CollectableRow) (command.Update, error) {
 	var u command.Update
 	var result *int16
-	err := row.Scan(&u.CommandID, &u.DroneID, &u.Type, &u.Status, &u.Reason, &u.Attempts, &result, &u.IssuedBy, &u.At)
+	err := row.Scan(&u.CommandID, &u.FleetID, &u.DroneID, &u.Type, &u.Status, &u.Reason, &u.Attempts, &result, &u.IssuedBy, &u.At)
 	if result != nil {
 		r := uint8(*result)
 		u.MavResult = &r
