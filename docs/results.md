@@ -104,7 +104,7 @@ The consumer stored a batch as up to 500 separate `INSERT` statements, which hel
 
 ## Failure tests
 
-Each test kills a service with SIGKILL, so nothing gets to finish its work, then checks the result against a limit in the plan. Run them all with `make failures` (about 7 minutes) or one at a time from `loadtest/failures/`. Results are in `loadtest/results/failures.json`.
+Each test kills a service with SIGKILL, so nothing gets to finish its work, then checks the result against a limit in the plan. Run them all with `make failures` (about 10 minutes) or one at a time from `loadtest/failures/`. Results are in `loadtest/results/failures.json`.
 
 | Failure | Limit | Result | |
 |---|---|---|---|
@@ -121,7 +121,7 @@ Whether a kill leaves a batch written but unacknowledged is down to timing, and 
 
 The 9.5-minute run tests the edge of the 10-minute retention window at a lower rate. At a full 10,000 messages a second the stream would hold about 5.7 million messages and catching up would take over 20 minutes, because the consumer only has about 4,000 rows a second to spare. That case was not run. Messages stay safe as long as the consumer is faster than the drones, since the oldest waiting message then gets younger as it catches up.
 
-**Ingester.** 112,860 messages were lost, the plan's accepted cost: UDP has no retry. That is about 11 s of traffic, from the 10 s outage and the test's checks either side of it. The rate was back to 10,000 a second when next measured, 6 s after the restart.
+**Ingester.** 112,860 messages were lost, the plan's accepted cost: UDP has no retry. That is about 11 s of traffic, from the 10 s outage and the test's checks either side of it. The rate was back to 10,000 a second when next measured, starting 6 s after the restart.
 
 **Packet drops.** The counters differ by 10 because a drop in a drone's last moments leaves no gap to see, and one before a drone's first heartbeat comes before the ingester knows it. For the same reason 52 frames that did arrive were not stored: they came before a first heartbeat. `tc netem` needs root and gives no count, so fakegen does the dropping (`-drop`).
 
@@ -130,7 +130,7 @@ Running these found two bugs, both fixed:
 - **Link counters fell.** Rebinding a drone discarded its counts, so counters such as `murmur_ingester_link_losses_total` went down. Prometheus reads that as a reset, which gives a false spike.
 - **fakegen stayed on the ingester's old address.** An ingester back on a new IP address received nothing until fakegen was restarted too. It now looks the name up every 5 s.
 
-Setting up also showed that after a reboot the services looped on infrastructure that never came back, as NATS, TimescaleDB, Redis and Prometheus had no restart policy. They do now, but this has not been tested with a real reboot.
+Setting up also showed that after a reboot the services looped on infrastructure that never came back, as NATS, TimescaleDB, Redis and Prometheus had no restart policy. They do now, and on the next real reboot the whole stack came back by itself in 24 s, with all 10 drones live.
 
 ## Limits of these results
 
