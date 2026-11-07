@@ -17,6 +17,7 @@ import (
 	"github.com/nats-io/nats.go"
 	"github.com/redis/go-redis/v9"
 
+	"github.com/ChengCK18/murmur/internal/alert"
 	"github.com/ChengCK18/murmur/internal/bus/natstest"
 	"github.com/ChengCK18/murmur/internal/command"
 	"github.com/ChengCK18/murmur/internal/db/dbtest"
@@ -352,4 +353,83 @@ func mustRedisOptions(t *testing.T, url string) *redis.Options {
 		t.Fatal(err)
 	}
 	return o
+}
+
+// TestAlerts runs the alerter on a fake fleet: a geofence that leaves every
+// drone outside, a battery level every drone is below, and the fleet stopping.
+// Every alert is raised once per drone, and written to the events table.
+func TestAlerts(t *testing.T) {
+	const drones = 5
+	bin := build(t, "ingester", "alerter", "fakegen")
+	natsURL := natstest.Start(t)
+	pool, dbURL := dbtest.NewURL(t)
+	udp := freeUDPPort(t)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+
+	start(t, bin, "ingester", "-listen", udp, "-nats", natsURL, "-db", dbURL, "-metrics", "", "-interval", "1h")
+	start(t, bin, "alerter", "-nats", natsURL, "-db", dbURL, "-metrics", "", "-low-battery", "101")
+	time.Sleep(time.Second)
+
+	nc, err := nats.Connect(natsURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer nc.Close()
+	got := make(chan alert.Alert, 100)
+	if _, err := nc.Subscribe(alert.Subjects, func(m *nats.Msg) {
+		var a alert.Alert
+		if json.Unmarshal(m.Data, &a) == nil {
+			got <- a
+		}
+	}); err != nil {
+		t.Fatal(err)
+	}
+	nc.Flush() //nolint:errcheck
+
+	fleet := start(t, bin, "fakegen", "-count", strconv.Itoa(drones), "-target", udp)
+	// Far from the fleet, which flies near ArduPilot's SITL home.
+	data, _ := json.Marshal(alert.SetFence{User: "integration", Polygon: []alert.Point{{Lat: 10, Lon: 10}, {Lat: 10, Lon: 11}, {Lat: 11, Lon: 11}}})
+	if _, err := nc.Request(alert.GeofenceSet, data, 2*time.Second); err != nil {
+		t.Fatal(err)
+	}
+	raised := map[string]map[int64]int{} // kind → drone → times raised
+	expect := func(kind string) {
+		t.Helper()
+		for len(raised[kind]) < drones {
+			select {
+			case a := <-got:
+				if !a.Raised {
+					continue
+				}
+				if raised[a.Kind] == nil {
+					raised[a.Kind] = map[int64]int{}
+				}
+				raised[a.Kind][a.DroneID]++
+			case <-ctx.Done():
+				t.Fatalf("%s: %d of %d drones", kind, len(raised[kind]), drones)
+			}
+		}
+	}
+	expect(alert.LowBattery)
+	expect(alert.Geofence)
+
+	fleet.Process.Kill() //nolint:errcheck
+	fleet.Wait()         //nolint:errcheck
+	expect(alert.LinkLost)
+	for kind, byDrone := range raised {
+		for id, n := range byDrone {
+			if n != 1 {
+				t.Errorf("drone %d: %s raised %d times", id, kind, n)
+			}
+		}
+	}
+
+	var n int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM events WHERE type = 'alert'`).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n < 3*drones {
+		t.Errorf("%d events, want at least %d", n, 3*drones)
+	}
 }
