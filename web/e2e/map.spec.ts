@@ -43,7 +43,7 @@ test("the map shows the fleet moving", async ({ page }) => {
   page.on("pageerror", (e) => errors.push(e.message));
   await page.goto("/");
   await expect(page.locator(LIVE)).toHaveCount(DRONES, { timeout: 20_000 });
-  await expect(page.locator(".list li:not(.lost)")).toHaveCount(DRONES);
+  await expect(page.locator(".list li[data-drone-id]:not(.lost)")).toHaveCount(DRONES);
   await expect(page.getByTestId("banner")).toBeHidden();
   // No clutter from earlier runs: drones silent for 10 minutes are hidden.
   // (Fails if other drones flew in the last 10 minutes, such as SITL.)
@@ -116,7 +116,7 @@ test("drones whose link is lost turn grey, and recover", async ({ page }) => {
     execSync(`${compose} stop fakegen`, { stdio: "inherit" });
     // No heartbeat for 3 s: the gateway pushes link lost.
     await expect(page.locator(LIVE)).toHaveCount(0, { timeout: 15_000 });
-    await expect(page.locator(".list li:not(.lost)")).toHaveCount(0);
+    await expect(page.locator(".list li[data-drone-id]:not(.lost)")).toHaveCount(0);
   } finally {
     execSync(`${compose} start fakegen`, { stdio: "inherit" });
   }

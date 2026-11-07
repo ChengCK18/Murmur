@@ -44,7 +44,7 @@ test("sending commands takes a login", async ({ page }) => {
 
   await page.reload(); // the session is a cookie, so it outlives the page
   await expect(page.locator(LIVE)).toHaveCount(DRONES, { timeout: 20_000 });
-  await page.locator(".list li").first().click();
+  await page.locator(".list li[data-drone-id]").first().click();
   await expect(page.getByText("Logged in as demo")).toBeVisible();
 
   await page.getByRole("button", { name: "Log out" }).click();
@@ -121,7 +121,7 @@ test("a fleet command ends with a result for every drone", async ({ page }) => {
   const summary = page.getByTestId("fleet-summary");
   await expect(summary).toHaveAttribute("data-waiting", "0", { timeout: 5_000 });
   await expect(summary).toHaveText(`Return to launch: ${DRONES} accepted`);
-  await expect(page.locator(".list li", { hasText: "RTL" })).toHaveCount(DRONES, { timeout: 15_000 });
+  await expect(page.locator(".list li[data-drone-id]", { hasText: "RTL" })).toHaveCount(DRONES, { timeout: 15_000 });
 });
 
 test("a mission is planned on the map, uploaded and flown", async ({ page }) => {
