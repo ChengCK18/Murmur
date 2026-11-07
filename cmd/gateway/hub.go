@@ -14,6 +14,7 @@ import (
 
 	"github.com/redis/go-redis/v9"
 
+	"github.com/ChengCK18/murmur/internal/command"
 	"github.com/ChengCK18/murmur/internal/schema"
 	"github.com/ChengCK18/murmur/internal/state"
 )
@@ -32,7 +33,8 @@ type hub struct {
 	removed   map[int64]bool         // stale, and subscribers told so
 	subs      map[int64]map[*client]struct{}
 	areas     map[*client]struct{} // clients following a map area
-	allLoaded bool                 // every Redis hash merged in once
+	users     map[string]map[*client]struct{}
+	allLoaded bool // every Redis hash merged in once
 
 	feedMessages atomic.Uint64
 	feedErrors   atomic.Uint64
@@ -46,6 +48,7 @@ func newHub(tenant int64, timeout time.Duration, maxSubs int, rdb *redis.Client)
 		removed: map[int64]bool{},
 		subs:    map[int64]map[*client]struct{}{},
 		areas:   map[*client]struct{}{},
+		users:   map[string]map[*client]struct{}{},
 	}
 }
 
@@ -341,9 +344,15 @@ type (
 
 // Messages from browsers.
 type request struct {
-	Type   string    `json:"type"` // "subscribe", "unsubscribe" or "subscribe_area"
+	Type   string    `json:"type"` // "subscribe", "unsubscribe", "subscribe_area" or "command"
 	Drones []int64   `json:"drones,omitempty"`
 	BBox   []float64 `json:"bbox,omitempty"` // minLng, minLat, maxLng, maxLat
+
+	// A command.
+	RequestID string         `json:"request_id,omitempty"`
+	DroneID   int64          `json:"drone_id,omitempty"`
+	Command   string         `json:"command,omitempty"`
+	Params    command.Params `json:"params"`
 }
 
 func encode(v any) []byte {

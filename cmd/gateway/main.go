@@ -31,6 +31,8 @@ type config struct {
 	tenant                                      int64
 	throttle, timeout, stale                    time.Duration
 	maxSubs                                     int
+	commands                                    bool
+	user, password                              string
 }
 
 func main() {
@@ -47,6 +49,9 @@ func main() {
 	flag.DurationVar(&cfg.timeout, "timeout", linkstats.DefaultTimeout, "no heartbeat for this long: link lost")
 	flag.DurationVar(&cfg.stale, "stale", 10*time.Minute, "nothing heard for this long: hide the drone; 0 shows every drone ever seen")
 	flag.IntVar(&cfg.maxSubs, "max-subs", 100, "most drones one browser can subscribe to")
+	flag.BoolVar(&cfg.commands, "commands", true, "accept commands from logged-in browsers")
+	flag.StringVar(&cfg.user, "user", "demo", "the demo login's username")
+	flag.StringVar(&cfg.password, "password", "", `the demo login's password; "" for no logins`)
 	flag.Parse()
 	log.SetFlags(log.Ltime)
 	for _, o := range strings.Split(origins, ",") {
@@ -92,7 +97,13 @@ func run(ctx context.Context, cfg config, ready chan<- string) error {
 
 	h := newHub(cfg.tenant, cfg.timeout, cfg.maxSubs, rdb)
 	h.stale = cfg.stale
-	s := &server{hub: h, nc: nc, throttle: cfg.throttle, origins: cfg.origins, web: cfg.web}
+	s := &server{hub: h, nc: nc, throttle: cfg.throttle, origins: cfg.origins, web: cfg.web, commands: cfg.commands,
+		sessions: sessions{rdb: rdb, user: cfg.user, password: cfg.password}}
+	if cfg.commands {
+		if err := runStatus(nc, h); err != nil {
+			return err
+		}
+	}
 	if cfg.metricsAddr != "" {
 		reg := metrics.NewRegistry()
 		s.registerMetrics(reg)

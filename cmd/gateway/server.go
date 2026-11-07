@@ -17,6 +17,7 @@ import (
 	"github.com/nats-io/nats.go/jetstream"
 
 	"github.com/ChengCK18/murmur/internal/bus"
+	"github.com/ChengCK18/murmur/internal/command"
 	"github.com/ChengCK18/murmur/internal/schema"
 )
 
@@ -29,6 +30,8 @@ type server struct {
 	throttle time.Duration
 	origins  []string // allowed WebSocket origins besides the gateway's own
 	web      string   // built web app to serve, or ""
+	commands bool     // the command path is on (decision 13)
+	sessions sessions
 	counts   counters
 	clients  atomic.Int64
 }
@@ -38,6 +41,12 @@ func (s *server) routes() http.Handler {
 	mux.HandleFunc("GET /ws", s.handleWS)
 	mux.HandleFunc("GET /api/drones", s.handleDrones)
 	mux.HandleFunc("GET /api/health", s.handleHealth)
+	mux.HandleFunc("POST /api/login", s.handleLogin)
+	mux.HandleFunc("POST /api/logout", s.handleLogout)
+	mux.HandleFunc("GET /api/session", s.handleSession)
+	if s.commands {
+		mux.HandleFunc("GET /api/drones/{id}/commands", s.handleCommands)
+	}
 	if s.web != "" {
 		mux.Handle("GET /", spa(s.web))
 	}
@@ -48,9 +57,11 @@ func (s *server) routes() http.Handler {
 //
 //	browser → gateway  {"type":"subscribe","drones":[1,2,3]}  {"type":"unsubscribe","drones":[2]}
 //	                   {"type":"subscribe_area","bbox":[minLng,minLat,maxLng,maxLat]}  replaces the last area
+//	                   {"type":"command","request_id":"r1","drone_id":1,"command":"takeoff","params":{"altitude_m":20}}
 //	gateway → browser  {"type":"snapshot","drones":[...]}      on each subscribe; for an area, drones newly in it
 //	                   {"type":"update","drone_id":1,"state":{...}}
 //	                   {"type":"remove","drone_id":1}            silent for -stale
+//	                   {"type":"command_status","request_id":"r1","update":{...}}
 //	                   {"type":"error","message":"..."}
 func (s *server) handleWS(w http.ResponseWriter, r *http.Request) {
 	conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{OriginPatterns: s.origins})
@@ -70,6 +81,15 @@ func (s *server) handleWS(w http.ResponseWriter, r *http.Request) {
 	s.clients.Add(1)
 	defer s.clients.Add(-1)
 	defer s.hub.remove(cl)
+
+	// The login at connect time, for routing statuses; each command checks the
+	// session again. The page reconnects after logging in or out.
+	token := cookieToken(r)
+	if user := s.sessions.userOf(ctx, token); user != "" {
+		s.hub.addUser(cl, user)
+		defer s.hub.removeUser(cl, user)
+	}
+	inFlight := make(chan struct{}, maxCommandsAtOnce)
 
 	go func() {
 		// A write that fails or takes longer than writeTimeout ends the
@@ -99,6 +119,20 @@ func (s *server) handleWS(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 			s.hub.subscribeArea(ctx, cl, b)
+		case "command":
+			if !s.commands {
+				cl.status(req.RequestID, command.Update{DroneID: req.DroneID, Type: req.Command, Status: command.Rejected, Reason: "commands are switched off", At: time.Now()})
+				continue
+			}
+			select {
+			case inFlight <- struct{}{}:
+				go func() {
+					defer func() { <-inFlight }()
+					s.command(ctx, cl, token, req)
+				}()
+			default:
+				cl.status(req.RequestID, command.Update{DroneID: req.DroneID, Type: req.Command, Status: command.Rejected, Reason: "too many commands at once", At: time.Now()})
+			}
 		default:
 			cl.errorf("unknown request type %q", req.Type)
 		}

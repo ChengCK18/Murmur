@@ -109,12 +109,14 @@ services:
     command:
       - -nats=nats://nats:4222
       - -db=postgres://murmur:murmur@timescaledb:5432/murmur
+      - -redis=redis:6379
       - -metrics=:9104
     ports:
       - "127.0.0.1:9104:9104"
     depends_on:
       nats: { condition: service_healthy }
       timescaledb: { condition: service_healthy }
+      redis: { condition: service_healthy }
     restart: unless-stopped
     healthcheck:
       <<: *metrics-health
@@ -144,6 +146,7 @@ services:
       - -redis=redis:6379
       - -metrics=:9103
       - -web=/web # the map at http://localhost:8080
+      - -password=murmur # the demo login, user "demo"; local default like the others here
     ports:
       - "127.0.0.1:8080:8080"
       - "127.0.0.1:9103:9103"
