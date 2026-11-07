@@ -1,8 +1,8 @@
 import { useEffect, useRef } from "react";
-import { LngLatBounds, Map as MapLibreMap, Marker, setWorkerUrl } from "maplibre-gl";
+import { type GeoJSONSource, LngLatBounds, Map as MapLibreMap, Marker, setWorkerUrl } from "maplibre-gl";
 import workerUrl from "maplibre-gl/dist/maplibre-gl-worker.mjs?url";
 import "maplibre-gl/dist/maplibre-gl.css";
-import type { BBox, DroneState } from "./types";
+import type { BBox, DroneState, Waypoint } from "./types";
 import { altitudeLabel, batteryLabel, followedArea } from "./drones";
 
 // MapLibre loads and decodes tiles in a web worker, which it looks for next
@@ -20,23 +20,38 @@ interface Props {
   selected: number | null;
   onSelect(id: number): void;
   onArea(bbox: BBox): void;
+  route: Waypoint[]; // the mission being planned, or the one the drone holds
+  planning: boolean; // clicks on the map add waypoints
+  onPick(p: Waypoint): void;
 }
+
+const ROUTE = "mission-route";
 
 // DroneMap draws one marker per drone with a position: an arrow turned to
 // the heading, labelled with altitude and battery, grey once the link is lost.
 // It reports the area it shows whenever that changes, so the page follows only
 // the drones on screen.
-export function DroneMap({ drones, selected, onSelect, onArea }: Props) {
+export function DroneMap({ drones, selected, onSelect, onArea, route, planning, onPick }: Props) {
   const container = useRef<HTMLDivElement>(null);
   const map = useRef<MapLibreMap | null>(null);
   const markers = useRef(new Map<number, Marker>());
   const drawn = useRef(new Map<number, DroneState>()); // the state each marker shows
   const drawnSelected = useRef<number | null>(null);
   const fitted = useRef(false);
+  const points = useRef<Marker[]>([]);
+  const routeRef = useRef(route);
+  routeRef.current = route;
+  const pick = useRef<((p: Waypoint) => void) | null>(null);
+  pick.current = planning ? onPick : null;
 
   useEffect(() => {
     const m = new MapLibreMap({ container: container.current!, style: STYLE, center: HOME, zoom: 15 });
     map.current = m;
+    m.on("click", (e) => pick.current?.({ lat: e.lngLat.lat, lon: e.lngLat.lng }));
+    m.on("load", () => {
+      m.addSource(ROUTE, { type: "geojson", data: routeLine(routeRef.current) });
+      m.addLayer({ id: ROUTE, type: "line", source: ROUTE, paint: { "line-color": "#d97706", "line-width": 3, "line-dasharray": [2, 1] } });
+    });
     const report = () => {
       const b = m.getBounds();
       onArea(followedArea([b.getWest(), b.getSouth(), b.getEast(), b.getNorth()]));
@@ -89,6 +104,24 @@ export function DroneMap({ drones, selected, onSelect, onArea }: Props) {
     }
   }, [drones, selected, onSelect]);
 
+  // The route: a numbered marker per waypoint, joined by a line.
+  useEffect(() => {
+    const m = map.current;
+    if (!m) return;
+    points.current.forEach((p) => p.remove());
+    points.current = route.map((w, i) => {
+      const el = document.createElement("div");
+      el.className = "waypoint";
+      el.textContent = String(i + 1);
+      return new Marker({ element: el }).setLngLat([w.lon, w.lat]).addTo(m);
+    });
+    (m.getSource(ROUTE) as GeoJSONSource | undefined)?.setData(routeLine(route));
+  }, [route]);
+
+  useEffect(() => {
+    map.current?.getCanvas().classList.toggle("planning", planning);
+  }, [planning]);
+
   // Centre on a drone picked in the list.
   useEffect(() => {
     const d = drones.find((x) => x.drone_id === selected);
@@ -99,6 +132,10 @@ export function DroneMap({ drones, selected, onSelect, onArea }: Props) {
   }, [selected]);
 
   return <div ref={container} className="map" />;
+}
+
+function routeLine(route: Waypoint[]): Parameters<GeoJSONSource["setData"]>[0] {
+  return { type: "Feature", properties: {}, geometry: { type: "LineString", coordinates: route.map((w) => [w.lon, w.lat]) } };
 }
 
 function markerElement(id: number, onSelect: (id: number) => void): HTMLElement {

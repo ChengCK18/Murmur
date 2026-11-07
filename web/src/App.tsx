@@ -6,7 +6,7 @@ import { Drones } from "./drones";
 import { DroneList } from "./DroneList";
 import { DroneMap } from "./DroneMap";
 import { FleetBar } from "./FleetBar";
-import type { BBox, CommandParams, CommandType, CommandUpdate, DroneState } from "./types";
+import type { BBox, CommandParams, CommandType, CommandUpdate, DroneState, Mission, Waypoint } from "./types";
 
 const LIST_EVERY = 10_000; // ms between refreshes of the whole fleet's list
 
@@ -24,6 +24,9 @@ export function App() {
   const selectedRef = useRef<number | null>(null);
   selectedRef.current = selected;
 
+  const [mission, setMission] = useState<Mission | null>(null);
+  const [plan, setPlan] = useState<Waypoint[]>([]);
+  const [planning, setPlanning] = useState(false);
   const [fleet, setFleet] = useState<FleetView | null>(null);
   // The latest fleet command: what the summary is counted from.
   const latestFleet = useRef<{ type: string; count: number; requestId: string; fleetId?: string; error?: string } | null>(null);
@@ -67,6 +70,17 @@ export function App() {
     [showLog],
   );
 
+  const reloadMission = useCallback(async (id: number) => {
+    try {
+      const res = await fetch(`/api/drones/${id}/mission`);
+      if (!res.ok) return;
+      const body = (await res.json()) as { mission: Mission | null };
+      if (selectedRef.current === id) setMission(body.mission);
+    } catch {
+      // The gateway is down; the banner shows it.
+    }
+  }, []);
+
   useEffect(() => {
     // Updates arrive up to 4 per second per drone; render at most once per frame.
     let frame = 0;
@@ -101,6 +115,9 @@ export function App() {
       commandStatus: (u, requestId) => {
         commands.current.apply(u, requestId);
         showLog();
+        if (u.type === "mission_upload" && u.drone_id === selectedRef.current && u.status !== "pending") {
+          void reloadMission(u.drone_id);
+        }
       },
       snapshot: (ds) => {
         store.current.snapshot(ds);
@@ -144,7 +161,7 @@ export function App() {
       c.stop();
       conn.current = null;
     };
-  }, [reloadLog, reloadFleet, showLog]);
+  }, [reloadLog, reloadFleet, reloadMission, showLog]);
 
   useEffect(() => {
     void (async () => {
@@ -161,12 +178,16 @@ export function App() {
   // The selected drone stays live wherever the map is.
   useEffect(() => {
     showLog();
+    setMission(null);
+    setPlan([]);
+    setPlanning(false);
     if (selected === null) return;
+    void reloadMission(selected);
     if (user) void reloadLog(selected);
     const c = conn.current;
     c?.subscribe([selected]);
     return () => c?.unsubscribe([selected]);
-  }, [selected, user, reloadLog, showLog]);
+  }, [selected, user, reloadLog, reloadMission, showLog]);
 
   const select = useCallback((id: number) => setSelected(id), []);
   const followArea = useCallback((b: BBox) => {
@@ -186,6 +207,24 @@ export function App() {
     },
     [user, showLog],
   );
+
+  const upload = useCallback(
+    (altitudeM: number) => {
+      const id = selectedRef.current;
+      if (id === null) return;
+      const requestId = commands.current.start(id, "mission_upload", user);
+      if (!conn.current?.upload(requestId, id, plan, altitudeM)) {
+        commands.current.notSent(requestId);
+      }
+      setPlan([]);
+      setPlanning(false);
+      showLog();
+    },
+    [user, plan, showLog],
+  );
+
+  const addWaypoint = useCallback((w: Waypoint) => setPlan((p) => [...p, w]), []);
+  const clearPlan = useCallback(() => setPlan([]), []);
 
   const sendFleet = useCallback(
     (type: CommandType) => {
@@ -243,9 +282,31 @@ export function App() {
         {user && <FleetBar live={drones.filter((d) => d.link === "ok").length} view={fleet} onSend={sendFleet} />}
       </DroneList>
       <div className="stage">
-        <DroneMap drones={drones} selected={selected} onSelect={select} onArea={followArea} />
+        <DroneMap
+          drones={drones}
+          selected={selected}
+          onSelect={select}
+          onArea={followArea}
+          route={plan.length > 0 || planning ? plan : (mission?.waypoints ?? [])}
+          planning={planning}
+          onPick={addWaypoint}
+        />
         {drone && checked && (
-          <CommandPanel key={drone.drone_id} drone={drone} user={user} log={log} onSend={send} onLogin={login} onLogout={logout} />
+          <CommandPanel
+            key={drone.drone_id}
+            drone={drone}
+            user={user}
+            log={log}
+            onSend={send}
+            onLogin={login}
+            onLogout={logout}
+            mission={mission}
+            plan={plan}
+            planning={planning}
+            onPlanning={setPlanning}
+            onClearPlan={clearPlan}
+            onUpload={upload}
+          />
         )}
       </div>
     </div>

@@ -33,6 +33,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - "Return all to launch" and "Land all" above the drone list, with a confirmation, totals such as "18 accepted, 1 rejected, 1 timed out", and the failures listed drone by drone.
 - Mission upload: the commander runs MAVLink's mission handshake through the ingester, with a timeout and 3 tries at each step, answering repeated requests, and keeps missions in a `missions` table. One upload runs per drone, and other commands to that drone are refused until it ends. Start mission needs one uploaded.
 - `{"type":"mission_upload",...}` on the WebSocket and `GET /api/drones/{id}/mission` on the gateway.
+- Mission planning on the map: click to add waypoints, upload them to the selected drone, start the mission, and see the route it holds.
 - SITL stream-rate parameters (`deploy/sitl/murmur-streams.parm`) so headless SITL sends position, attitude, system and battery status without a ground station.
 - `deploy/sitl/run-fleet.sh` to start several SITL drones sending straight to the ingester (by name or IP address), lined up south of `fakegen`'s grid so the two fleets can run together.
 - `docker compose --profile sitl up` (`make sitl`) adds 3 ArduCopter SITL drones to the stack. The first build compiles ArduPilot, about 5 minutes; plain `docker compose up` does not need it.

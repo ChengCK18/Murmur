@@ -1,4 +1,4 @@
-import type { CommandStatus, CommandType, CommandUpdate } from "./types";
+import type { CommandStatus, CommandUpdate } from "./types";
 
 const FINAL: ReadonlySet<CommandStatus> = new Set([
   "accepted",
@@ -34,6 +34,7 @@ export const TYPE_LABELS: Record<string, string> = {
   return_to_launch: "Return to launch",
   land: "Land",
   mission_start: "Start mission",
+  mission_upload: "Mission upload",
 };
 
 const LOST = "The connection was lost before an answer. Check the drone's state.";
@@ -60,7 +61,7 @@ export class Commands {
   private readonly order: (string | CommandUpdate)[] = []; // newest last
 
   // start records a command about to be sent, and returns its request ID.
-  start(droneId: number, type: CommandType, user: string): string {
+  start(droneId: number, type: string, user: string): string {
     const requestId = `r${this.next++}`;
     const u: CommandUpdate = { drone_id: droneId, type, status: "pending", attempts: 0, issued_by: user, at: new Date().toISOString() };
     this.local.set(requestId, u);

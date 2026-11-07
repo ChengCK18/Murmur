@@ -1,4 +1,4 @@
-import type { BBox, CommandParams, CommandType, CommandUpdate, DroneState, ServerMessage } from "./types";
+import type { BBox, CommandParams, CommandType, CommandUpdate, DroneState, ServerMessage, Waypoint } from "./types";
 
 export type Status = "connecting" | "open" | "reconnecting";
 
@@ -94,6 +94,15 @@ export class Connection {
   fleetCommand(requestId: string, droneIds: number[], type: CommandType, params: CommandParams = {}): boolean {
     if (this.socket?.readyState !== OPEN) return false;
     this.socket.send(JSON.stringify({ type: "fleet_command", request_id: requestId, drones: droneIds, command: type, params }));
+    return true;
+  }
+
+  // upload sends a mission; false if the socket is not open to take it.
+  upload(requestId: string, droneId: number, waypoints: Waypoint[], altitudeM: number): boolean {
+    if (this.socket?.readyState !== OPEN) return false;
+    this.socket.send(
+      JSON.stringify({ type: "mission_upload", request_id: requestId, drone_id: droneId, waypoints, altitude_m: altitudeM }),
+    );
     return true;
   }
 

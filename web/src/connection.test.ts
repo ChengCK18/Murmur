@@ -186,4 +186,13 @@ describe("Connection", () => {
     expect(conn.fleetCommand("r2", [1, 2], "land")).toBe(true);
     expect(sockets[0].sent.at(-1)).toEqual({ type: "fleet_command", request_id: "r2", drones: [1, 2], command: "land", params: {} });
   });
+
+  it("sends a mission only on an open socket", () => {
+    const points = [{ lat: -35, lon: 149 }];
+    expect(conn.upload("r1", 1, points, 20)).toBe(false);
+    conn.start();
+    sockets[0].accept();
+    expect(conn.upload("r2", 1, points, 20)).toBe(true);
+    expect(sockets[0].sent.at(-1)).toEqual({ type: "mission_upload", request_id: "r2", drone_id: 1, waypoints: points, altitude_m: 20 });
+  });
 });

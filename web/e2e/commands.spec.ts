@@ -123,3 +123,39 @@ test("a fleet command ends with a result for every drone", async ({ page }) => {
   await expect(summary).toHaveText(`Return to launch: ${DRONES} accepted`);
   await expect(page.locator(".list li", { hasText: "RTL" })).toHaveCount(DRONES, { timeout: 15_000 });
 });
+
+test("a mission is planned on the map, uploaded and flown", async ({ page }) => {
+  const id = await selectADrone(page);
+  await logIn(page);
+  await expect(page.getByTestId("mission-state")).toHaveText("No mission uploaded");
+  await expect(page.getByRole("button", { name: "Start mission" })).toBeDisabled();
+
+  // Three points on the map, away from the panel.
+  await page.getByRole("button", { name: "Plan on map" }).click();
+  const box = (await page.locator(".maplibregl-canvas").boundingBox())!;
+  for (const [x, y] of [[0.2, 0.3], [0.3, 0.6], [0.4, 0.3]]) {
+    await page.mouse.click(box.x + box.width * x, box.y + box.height * y);
+  }
+  await expect(page.locator(".waypoint")).toHaveCount(3);
+  await expect(page.getByText("3 so far")).toBeVisible();
+
+  await page.getByRole("button", { name: "Upload" }).click();
+  await expect(page.getByTestId("mission-state")).toHaveText("3 waypoints at 20 m: uploaded", { timeout: 10_000 });
+  await expect(newest(page)).toContainText("Mission upload");
+  await expect(newest(page)).toHaveAttribute("data-status", "accepted");
+  await expect(page.locator(".waypoint")).toHaveCount(3); // still drawn, now as the drone's
+
+  await page.getByRole("button", { name: "Start mission" }).click();
+  await page.getByRole("button", { name: "Confirm" }).click();
+  await expect(newest(page)).toContainText("Start mission");
+  await expect(newest(page)).toHaveAttribute("data-status", "accepted");
+
+  // It leaves its route for the first waypoint, in AUTO.
+  const marker = page.locator(`.drone[data-drone-id="${id}"]`);
+  const at = async () => [Number(await marker.getAttribute("data-lat")), Number(await marker.getAttribute("data-lon"))];
+  const start = await at();
+  await expect.poll(async () => {
+    const [lat, lon] = await at();
+    return Math.hypot(lat - start[0], lon - start[1]);
+  }, { timeout: 15_000 }).toBeGreaterThan(0.0001);
+});

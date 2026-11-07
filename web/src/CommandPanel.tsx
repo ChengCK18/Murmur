@@ -1,7 +1,7 @@
 import { type FormEvent, useState } from "react";
 import { isFinal, STATUS_LABELS, TYPE_LABELS } from "./commands";
 import { altitudeLabel, batteryLabel } from "./drones";
-import type { CommandParams, CommandType, CommandUpdate, DroneState } from "./types";
+import type { CommandParams, CommandType, CommandUpdate, DroneState, Mission, Waypoint } from "./types";
 
 const MODES = ["GUIDED", "AUTO", "RTL", "LAND"];
 
@@ -12,6 +12,12 @@ interface Props {
   onSend(type: CommandType, params?: CommandParams): void;
   onLogin(username: string, password: string): Promise<string>;
   onLogout(): void;
+  mission: Mission | null; // what the drone holds
+  plan: Waypoint[]; // the mission being drawn
+  planning: boolean;
+  onPlanning(on: boolean): void;
+  onClearPlan(): void;
+  onUpload(altitudeM: number): void;
 }
 
 // A command that waits for a second click: arm and takeoff (plan §4).
@@ -22,7 +28,7 @@ interface Pending {
 }
 
 // CommandPanel sends commands to the selected drone and shows how each ended.
-export function CommandPanel({ drone, user, log, onSend, onLogin, onLogout }: Props) {
+export function CommandPanel({ drone, user, log, onSend, onLogin, onLogout, ...mission }: Props) {
   return (
     <section className="panel" aria-label={`Drone ${drone.drone_id}`}>
       <h2>Drone {drone.drone_id}</h2>
@@ -39,6 +45,7 @@ export function CommandPanel({ drone, user, log, onSend, onLogin, onLogout }: Pr
             </button>
           </div>
           <Controls drone={drone} onSend={onSend} />
+          <MissionControls {...mission} onSend={onSend} droneId={drone.drone_id} />
           <Log log={log} />
         </>
       ) : (
@@ -138,6 +145,70 @@ function Controls({ drone, onSend }: { drone: DroneState; onSend: Props["onSend"
               Confirm
             </button>
             <button onClick={() => setConfirming(null)}>Cancel</button>
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
+type MissionProps = Pick<Props, "mission" | "plan" | "planning" | "onPlanning" | "onClearPlan" | "onUpload" | "onSend"> & {
+  droneId: number;
+};
+
+function MissionControls({ mission, plan, planning, onPlanning, onClearPlan, onUpload, onSend, droneId }: MissionProps) {
+  const [altitude, setAltitude] = useState(20);
+  const [confirming, setConfirming] = useState(false);
+  const ready = mission?.status === "uploaded";
+
+  return (
+    <>
+      <h3>Mission</h3>
+      {planning ? (
+        <p className="hint">Click the map to add waypoints. {plan.length} so far.</p>
+      ) : (
+        <p className="hint" data-testid="mission-state">
+          {mission ? `${mission.waypoints.length} waypoints at ${mission.altitude_m} m: ${mission.status}` : "No mission uploaded"}
+        </p>
+      )}
+      <div className="row">
+        <button onClick={() => onPlanning(!planning)}>{planning ? "Stop adding" : "Plan on map"}</button>
+        <button disabled={plan.length === 0} onClick={onClearPlan}>
+          Clear
+        </button>
+      </div>
+      <div className="row">
+        <input
+          aria-label="Mission altitude in metres"
+          type="number"
+          min={1}
+          max={120}
+          value={altitude}
+          onChange={(e) => setAltitude(Number(e.target.value))}
+        />
+        <button disabled={plan.length === 0 || altitude <= 0} onClick={() => onUpload(altitude)}>
+          Upload
+        </button>
+      </div>
+      <div className="row">
+        <button disabled={!ready} onClick={() => setConfirming(true)}>
+          Start mission
+        </button>
+      </div>
+      {confirming && (
+        <div className="confirm" role="alertdialog" aria-label="Confirm">
+          <p>Start the mission on drone {droneId}?</p>
+          <div className="row">
+            <button
+              className="yes"
+              onClick={() => {
+                onSend("mission_start");
+                setConfirming(false);
+              }}
+            >
+              Confirm
+            </button>
+            <button onClick={() => setConfirming(false)}>Cancel</button>
           </div>
         </div>
       )}

@@ -55,6 +55,18 @@ export interface CommandParams {
   mode?: string;
 }
 
+export interface Waypoint {
+  lat: number;
+  lon: number;
+}
+
+// The mission a drone holds (internal/command.MissionView in Go).
+export interface Mission {
+  waypoints: Waypoint[];
+  altitude_m: number;
+  status: "uploading" | "uploaded" | "failed";
+}
+
 // A map area in degrees: west, south, east, north.
 export type BBox = [number, number, number, number];
 
