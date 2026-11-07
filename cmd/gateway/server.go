@@ -44,6 +44,9 @@ func (s *server) routes() http.Handler {
 	mux.HandleFunc("POST /api/login", s.handleLogin)
 	mux.HandleFunc("POST /api/logout", s.handleLogout)
 	mux.HandleFunc("GET /api/session", s.handleSession)
+	mux.HandleFunc("GET /api/alerts", s.handleAlerts)
+	mux.HandleFunc("GET /api/geofence", s.handleGeofence)
+	mux.HandleFunc("PUT /api/geofence", s.handleSetGeofence)
 	if s.commands {
 		mux.HandleFunc("GET /api/drones/{id}/commands", s.handleCommands)
 		mux.HandleFunc("GET /api/fleets/{id}/commands", s.handleFleet)
@@ -67,6 +70,7 @@ func (s *server) routes() http.Handler {
 //	                   {"type":"remove","drone_id":1}            silent for -stale
 //	                   {"type":"command_status","request_id":"r1","update":{...}}
 //	                   {"type":"fleet_started","request_id":"r2","fleet_id":"...","count":3}  or "error":"..."
+//	                   {"type":"alert","alert":{...}}  {"type":"geofence","fence":{...}}  to every browser
 //	                   {"type":"error","message":"..."}
 func (s *server) handleWS(w http.ResponseWriter, r *http.Request) {
 	conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{OriginPatterns: s.origins})
@@ -85,6 +89,7 @@ func (s *server) handleWS(w http.ResponseWriter, r *http.Request) {
 	}, s.throttle, &s.counts)
 	s.clients.Add(1)
 	defer s.clients.Add(-1)
+	s.hub.addClient(cl)
 	defer s.hub.remove(cl)
 
 	// The login at connect time, for routing statuses; each command checks the

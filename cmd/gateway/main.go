@@ -104,6 +104,9 @@ func run(ctx context.Context, cfg config, ready chan<- string) error {
 			return err
 		}
 	}
+	if err := runAlerts(nc, h); err != nil {
+		return err
+	}
 	if cfg.metricsAddr != "" {
 		reg := metrics.NewRegistry()
 		s.registerMetrics(reg)

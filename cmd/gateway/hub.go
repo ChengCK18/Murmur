@@ -34,7 +34,8 @@ type hub struct {
 	subs      map[int64]map[*client]struct{}
 	areas     map[*client]struct{} // clients following a map area
 	users     map[string]map[*client]struct{}
-	allLoaded bool // every Redis hash merged in once
+	clients   map[*client]struct{} // every browser, for alerts
+	allLoaded bool                 // every Redis hash merged in once
 
 	feedMessages atomic.Uint64
 	feedErrors   atomic.Uint64
@@ -49,6 +50,7 @@ func newHub(tenant int64, timeout time.Duration, maxSubs int, rdb *redis.Client)
 		subs:    map[int64]map[*client]struct{}{},
 		areas:   map[*client]struct{}{},
 		users:   map[string]map[*client]struct{}{},
+		clients: map[*client]struct{}{},
 	}
 }
 
@@ -192,6 +194,7 @@ func (h *hub) remove(cl *client) {
 		ids = append(ids, id)
 	}
 	delete(h.areas, cl)
+	delete(h.clients, cl)
 	h.mu.Unlock()
 	h.unsubscribe(cl, ids)
 }

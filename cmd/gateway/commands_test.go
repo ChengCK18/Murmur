@@ -15,6 +15,7 @@ import (
 	"github.com/nats-io/nats.go"
 	"github.com/redis/go-redis/v9"
 
+	"github.com/ChengCK18/murmur/internal/alert"
 	"github.com/ChengCK18/murmur/internal/bus/natstest"
 	"github.com/ChengCK18/murmur/internal/command"
 )
@@ -380,5 +381,60 @@ func TestMissionUpload(t *testing.T) {
 	}
 	if code := getJSON(t, "http://"+addr+"/api/drones/42/mission", &body); code != http.StatusOK || body.Mission == nil || body.Mission.Status != "uploaded" {
 		t.Errorf("%d %+v", code, body.Mission)
+	}
+}
+
+func TestAlertsReachEveryBrowser(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	addr, nc := commandGateway(t, ctx, config{commands: true, user: "demo", password: "secret"})
+	var set alert.SetFence
+	if _, err := nc.Subscribe(alert.GeofenceSet, func(m *nats.Msg) {
+		json.Unmarshal(m.Data, &set) //nolint:errcheck
+		data, _ := json.Marshal(alert.SetResult{Fence: alert.Fence{Polygon: set.Polygon, UpdatedBy: set.User}})
+		m.Respond(data) //nolint:errcheck
+	}); err != nil {
+		t.Fatal(err)
+	}
+	nc.Flush() //nolint:errcheck
+
+	a, b := dial(t, ctx, addr, nil), dial(t, ctx, addr, nil)
+	send(t, ctx, a, request{Type: "subscribe", Drones: []int64{1}})
+	read(t, ctx, a) // both connected and registered
+	send(t, ctx, b, request{Type: "subscribe", Drones: []int64{1}})
+	read(t, ctx, b)
+	data, _ := json.Marshal(alert.Alert{DroneID: 9, Kind: alert.LinkLost, Raised: true})
+	if err := nc.Publish(alert.Subject(9), data); err != nil {
+		t.Fatal(err)
+	}
+	for _, conn := range []*websocket.Conn{a, b} {
+		wait, cancel := context.WithTimeout(ctx, 5*time.Second)
+		var m alertMsg
+		err := wsjson.Read(wait, conn, &m)
+		cancel()
+		if err != nil || m.Type != "alert" || m.Alert.DroneID != 9 || !m.Alert.Raised {
+			t.Errorf("%+v, err %v", m, err)
+		}
+	}
+
+	put := func(c *http.Cookie) int {
+		body, _ := json.Marshal(map[string]any{"polygon": []alert.Point{{Lat: 1, Lon: 1}, {Lat: 1, Lon: 2}, {Lat: 2, Lon: 2}}})
+		req, _ := http.NewRequest("PUT", "http://"+addr+"/api/geofence", bytes.NewReader(body))
+		if c != nil {
+			req.AddCookie(c)
+		}
+		res, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		res.Body.Close()
+		return res.StatusCode
+	}
+	if code := put(nil); code != http.StatusUnauthorized {
+		t.Errorf("without a login: %d", code)
+	}
+	c, _ := login(t, addr, "demo", "secret")
+	if code := put(c); code != http.StatusOK || set.User != "demo" || len(set.Polygon) != 3 {
+		t.Errorf("%d, forwarded %+v", code, set)
 	}
 }
