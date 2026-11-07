@@ -171,6 +171,60 @@ func (s *server) fleetCommand(ctx context.Context, cl *client, token string, req
 	cl.fleet(req.RequestID, f)
 }
 
+// missionUpload forwards a mission. It runs like a command: the first status
+// answers the request and the rest follow on command_status.
+func (s *server) missionUpload(ctx context.Context, cl *client, token string, req request) {
+	refuse := func(reason string) {
+		cl.status(req.RequestID, command.Update{DroneID: req.DroneID, Type: command.Upload, Status: command.Rejected, Reason: reason, At: time.Now()})
+	}
+	user := s.sessions.userOf(ctx, token)
+	if user == "" {
+		refuse("log in to send commands")
+		return
+	}
+	data, err := json.Marshal(command.MissionRequest{DroneID: req.DroneID, Waypoints: req.Waypoints, AltitudeM: req.AltitudeM, IssuedBy: user})
+	if err != nil {
+		refuse("could not send the mission")
+		return
+	}
+	wait, cancel := context.WithTimeout(ctx, commanderWait)
+	defer cancel()
+	m, err := s.nc.RequestWithContext(wait, command.MissionSubject, data)
+	if err != nil {
+		refuse("the command service is not answering")
+		return
+	}
+	var u command.Update
+	if err := json.Unmarshal(m.Data, &u); err != nil {
+		refuse("the command service gave a bad answer")
+		return
+	}
+	cl.status(req.RequestID, u)
+}
+
+// handleMission serves GET /api/drones/{id}/mission: the mission to draw for a
+// drone, or {"mission":null}.
+func (s *server) handleMission(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad drone ID"})
+		return
+	}
+	data, err := json.Marshal(command.MissionGet{DroneID: id})
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not ask"})
+		return
+	}
+	wait, cancel := context.WithTimeout(r.Context(), commanderWait)
+	defer cancel()
+	m, err := s.nc.RequestWithContext(wait, command.MissionGetSubject, data)
+	if err != nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "the command service is not answering"})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]json.RawMessage{"mission": m.Data})
+}
+
 // handleCommands serves GET /api/drones/{id}/commands: a drone's latest
 // commands, which a reconnected browser reloads from the command service.
 func (s *server) handleCommands(w http.ResponseWriter, r *http.Request) {

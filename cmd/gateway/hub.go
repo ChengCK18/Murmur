@@ -344,7 +344,7 @@ type (
 
 // Messages from browsers.
 type request struct {
-	Type   string    `json:"type"` // "subscribe", "unsubscribe", "subscribe_area", "command" or "fleet_command"
+	Type   string    `json:"type"` // "subscribe", "unsubscribe", "subscribe_area", "command", "fleet_command" or "mission_upload"
 	Drones []int64   `json:"drones,omitempty"`
 	BBox   []float64 `json:"bbox,omitempty"` // minLng, minLat, maxLng, maxLat
 
@@ -353,6 +353,10 @@ type request struct {
 	DroneID   int64          `json:"drone_id,omitempty"`
 	Command   string         `json:"command,omitempty"`
 	Params    command.Params `json:"params"`
+
+	// A mission upload.
+	Waypoints []command.Waypoint `json:"waypoints,omitempty"`
+	AltitudeM float64            `json:"altitude_m,omitempty"`
 }
 
 func encode(v any) []byte {

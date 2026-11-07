@@ -47,6 +47,7 @@ func (s *server) routes() http.Handler {
 	if s.commands {
 		mux.HandleFunc("GET /api/drones/{id}/commands", s.handleCommands)
 		mux.HandleFunc("GET /api/fleets/{id}/commands", s.handleFleet)
+		mux.HandleFunc("GET /api/drones/{id}/mission", s.handleMission)
 	}
 	if s.web != "" {
 		mux.Handle("GET /", spa(s.web))
@@ -60,6 +61,7 @@ func (s *server) routes() http.Handler {
 //	                   {"type":"subscribe_area","bbox":[minLng,minLat,maxLng,maxLat]}  replaces the last area
 //	                   {"type":"command","request_id":"r1","drone_id":1,"command":"takeoff","params":{"altitude_m":20}}
 //	                   {"type":"fleet_command","request_id":"r2","drones":[1,2,3],"command":"return_to_launch"}
+//	                   {"type":"mission_upload","request_id":"r3","drone_id":1,"waypoints":[{"lat":-35.3,"lon":149.1}],"altitude_m":20}
 //	gateway → browser  {"type":"snapshot","drones":[...]}      on each subscribe; for an area, drones newly in it
 //	                   {"type":"update","drone_id":1,"state":{...}}
 //	                   {"type":"remove","drone_id":1}            silent for -stale
@@ -122,7 +124,7 @@ func (s *server) handleWS(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 			s.hub.subscribeArea(ctx, cl, b)
-		case "command", "fleet_command":
+		case "command", "fleet_command", "mission_upload":
 			fleet := req.Type == "fleet_command"
 			refuse := func(reason string) {
 				if fleet {
@@ -139,9 +141,12 @@ func (s *server) handleWS(w http.ResponseWriter, r *http.Request) {
 			case inFlight <- struct{}{}:
 				go func() {
 					defer func() { <-inFlight }()
-					if fleet {
+					switch req.Type {
+					case "fleet_command":
 						s.fleetCommand(ctx, cl, token, req)
-					} else {
+					case "mission_upload":
+						s.missionUpload(ctx, cl, token, req)
+					default:
 						s.command(ctx, cl, token, req)
 					}
 				}()

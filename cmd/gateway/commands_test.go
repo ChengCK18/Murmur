@@ -334,3 +334,51 @@ func TestFleetCommand(t *testing.T) {
 		t.Errorf("forwarded %+v", req)
 	}
 }
+
+func TestMissionUpload(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	addr, nc := commandGateway(t, ctx, config{commands: true, user: "demo", password: "secret"})
+	var req command.MissionRequest
+	got := make(chan struct{}, 1)
+	if _, err := nc.Subscribe(command.MissionSubject, func(m *nats.Msg) {
+		json.Unmarshal(m.Data, &req) //nolint:errcheck
+		data, _ := json.Marshal(command.Update{CommandID: "m1", DroneID: req.DroneID, Type: command.Upload, Status: command.Pending, IssuedBy: req.IssuedBy})
+		m.Respond(data) //nolint:errcheck
+		got <- struct{}{}
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := nc.Subscribe(command.MissionGetSubject, func(m *nats.Msg) {
+		data, _ := json.Marshal(command.MissionView{Waypoints: []command.Waypoint{{Lat: -35, Lon: 149}}, AltitudeM: 20, Status: "uploaded"})
+		m.Respond(data) //nolint:errcheck
+	}); err != nil {
+		t.Fatal(err)
+	}
+	nc.Flush() //nolint:errcheck
+	upload := request{Type: "mission_upload", RequestID: "r1", DroneID: 42, AltitudeM: 20, Waypoints: []command.Waypoint{{Lat: -35, Lon: 149}}}
+
+	anon := dial(t, ctx, addr, nil)
+	send(t, ctx, anon, upload)
+	if m := nextStatus(t, ctx, anon); m.Update.Status != command.Rejected || m.Update.Reason != "log in to send commands" {
+		t.Errorf("without a login: %+v", m)
+	}
+
+	c, _ := login(t, addr, "demo", "secret")
+	conn := dial(t, ctx, addr, c)
+	send(t, ctx, conn, upload)
+	if m := nextStatus(t, ctx, conn); m.RequestID != "r1" || m.Update.Status != command.Pending {
+		t.Errorf("%+v", m)
+	}
+	<-got
+	if req.IssuedBy != "demo" || req.DroneID != 42 || len(req.Waypoints) != 1 {
+		t.Errorf("forwarded %+v", req)
+	}
+
+	var body struct {
+		Mission *command.MissionView `json:"mission"`
+	}
+	if code := getJSON(t, "http://"+addr+"/api/drones/42/mission", &body); code != http.StatusOK || body.Mission == nil || body.Mission.Status != "uploaded" {
+		t.Errorf("%d %+v", code, body.Mission)
+	}
+}
