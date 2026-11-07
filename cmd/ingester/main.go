@@ -19,8 +19,10 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/nats-io/nats.go"
 
 	"github.com/ChengCK18/murmur/internal/bus"
+	"github.com/ChengCK18/murmur/internal/command"
 	"github.com/ChengCK18/murmur/internal/db"
 	"github.com/ChengCK18/murmur/internal/linkstats"
 	"github.com/ChengCK18/murmur/internal/metrics"
@@ -38,11 +40,12 @@ func main() {
 	metricsAddr := flag.String("metrics", ":9101", `address to serve Prometheus /metrics on; "" for none`)
 	readBuffer := flag.Int("read-buffer", 4<<20, "UDP socket buffer in bytes; the kernel caps it at net.core.rmem_max")
 	queue := flag.Int("queue", 1<<16, "most packets waiting to be processed")
+	commands := flag.Bool("commands", true, "relay commands to drones; false makes this a telemetry-only ingester")
 	flag.Parse()
 	log.SetFlags(0)
 
 	cfg := config{listen: *listen, interval: *interval, timeout: *timeout, natsURL: *natsURL, maxPending: *maxPending,
-		tenant: *tenant, dbURL: *dbURL, metricsAddr: *metricsAddr, readBuffer: *readBuffer, queue: *queue}
+		tenant: *tenant, dbURL: *dbURL, metricsAddr: *metricsAddr, readBuffer: *readBuffer, queue: *queue, commands: *commands}
 	if err := run(cfg); err != nil {
 		log.Fatalf("ingester: %v", err)
 	}
@@ -57,6 +60,7 @@ type config struct {
 	dbURL             string
 	metricsAddr       string
 	readBuffer, queue int
+	commands          bool
 }
 
 func run(cfg config) error {
@@ -106,6 +110,12 @@ func run(cfg config) error {
 		defer p.close(5 * time.Second)
 		in.pub = p
 		fmt.Printf("publishing to %s, stream %s\n", cfg.natsURL, bus.TelemetryStream)
+		if cfg.commands {
+			if in.relay, err = startRelay(in, conn, p.nc); err != nil {
+				return err
+			}
+			fmt.Printf("relaying %s\n", command.Subjects)
+		}
 	}
 	if cfg.metricsAddr != "" {
 		reg := metrics.NewRegistry()
@@ -141,6 +151,19 @@ func run(cfg config) error {
 
 	fmt.Print("\nstopped\n", in.tick(time.Now()))
 	return nil
+}
+
+// startRelay subscribes to commands. They arrive on core NATS, so while this
+// ingester is down they go nowhere and the commander reports it.
+func startRelay(in *ingester, conn *net.UDPConn, nc *nats.Conn) (*relay, error) {
+	r, err := newRelay(in, conn.WriteToUDPAddrPort, nc.Publish)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := nc.Subscribe(command.Subjects, func(m *nats.Msg) { r.handle(m.Data) }); err != nil {
+		return nil, err
+	}
+	return r, nil
 }
 
 // openRegistry returns a registry backed by the drones table, so drone IDs

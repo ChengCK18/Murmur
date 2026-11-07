@@ -43,4 +43,16 @@ func (in *ingester) registerMetrics(reg prometheus.Registerer) {
 	}
 	metrics.Counter(reg, "murmur_ingester_published_total", "Messages handed to JetStream.", pubStat(false))
 	metrics.Counter(reg, "murmur_ingester_publish_errors_total", "Messages JetStream did not accept or acknowledge.", pubStat(true))
+
+	relayStat := func(f func(*relay) uint64) func() float64 {
+		return func() float64 {
+			if in.relay == nil {
+				return 0
+			}
+			return float64(f(in.relay))
+		}
+	}
+	metrics.Counter(reg, "murmur_ingester_commands_sent_total", "Command attempts sent to drones.", relayStat(func(r *relay) uint64 { return r.sent.Load() }))
+	metrics.Counter(reg, "murmur_ingester_commands_expired_total", "Commands refused for being past their expiry.", relayStat(func(r *relay) uint64 { return r.expired.Load() }))
+	metrics.Counter(reg, "murmur_ingester_commands_unreachable_total", "Commands to drones with no known address.", relayStat(func(r *relay) uint64 { return r.unreachable.Load() }))
 }

@@ -1,8 +1,8 @@
 // Package bus sets up NATS and JetStream for Murmur's services.
 //
 // Telemetry goes through the TELEMETRY stream (telemetry.<drone_id>), so a
-// consumer that restarts carries on where it stopped. Commands (command.*,
-// command_reply.*) stay on core NATS, outside any stream (plan §4): a command
+// consumer that restarts carries on where it stopped. Commands (see
+// internal/command) stay on core NATS, outside any stream (plan §4): a command
 // that cannot be delivered now must fail, not run later.
 package bus
 

@@ -19,9 +19,10 @@ import (
 
 // telemetry is the latest state of one drone, for the console.
 type telemetry struct {
-	src   netip.AddrPort
-	sysID uint8
-	comps map[uint8]bool // component IDs seen, to find the drone's link senders
+	src    netip.AddrPort
+	sysID  uint8
+	compID uint8          // the autopilot's component ID, which commands go to
+	comps  map[uint8]bool // component IDs seen, to find the drone's link senders
 
 	mode    string // empty until the autopilot's first heartbeat
 	armed   bool
@@ -37,6 +38,7 @@ type ingester struct {
 	links  *linkstats.Tracker
 	events io.Writer // one line per notable event
 	pub    publisher // nil: console only
+	relay  *relay    // nil: commands are off
 	tenant int64
 
 	queueDropped atomic.Uint64 // packets dropped because processing fell behind
@@ -84,7 +86,13 @@ func (in *ingester) handlePacket(at time.Time, src netip.AddrPort, data []byte) 
 // console report.
 func (in *ingester) handle(r mavlink.Received) {
 	id, ok := in.update(r)
-	if !ok || in.pub == nil || !published(r.Msg) {
+	if !ok {
+		return
+	}
+	if in.relay != nil {
+		in.relay.forward(id, r.Msg)
+	}
+	if in.pub == nil || !published(r.Msg) {
 		return
 	}
 	t, err := schema.FromReceived(in.tenant, int64(id), r)
@@ -148,6 +156,7 @@ func (in *ingester) update(r mavlink.Received) (registry.ID, bool) {
 	case *ardupilotmega.MessageHeartbeat:
 		if m.Autopilot != ardupilotmega.MAV_AUTOPILOT_INVALID { // the flight controller, not a camera or gimbal
 			t.mode, t.armed = mavlink.ModeName(m), mavlink.IsArmed(m)
+			t.compID = r.CompID
 		}
 	case *ardupilotmega.MessageGlobalPositionInt:
 		t.pos = m
@@ -155,6 +164,25 @@ func (in *ingester) update(r mavlink.Received) (registry.ID, bool) {
 		t.battery = m.BatteryRemaining
 	}
 	return res.Drone.ID, true
+}
+
+// target is where to send a drone's commands.
+type target struct {
+	src           netip.AddrPort
+	sysID, compID uint8
+}
+
+// target returns where a drone can be reached. It is false until the drone's
+// autopilot has been heard since this ingester started: an address remembered
+// from before may be long gone.
+func (in *ingester) target(id registry.ID) (target, bool) {
+	in.mu.Lock()
+	defer in.mu.Unlock()
+	t, ok := in.drones[id]
+	if !ok || t.compID == 0 {
+		return target{}, false
+	}
+	return target{src: t.src, sysID: t.sysID, compID: t.compID}, true
 }
 
 // eventf writes one event line. The caller holds in.mu.

@@ -22,6 +22,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `loadtest/failures/` (`make failures`): kills the consumer, the database, the ingester and the gateway, and drops packets, under load, and prints pass or fail against the plan's limits; results are in `docs/results.md`.
 - The ingester keeps drone IDs in the `drones` table (`-db`), so they survive an ingester restart.
 - `cmd/consumer`: writes telemetry from JetStream to TimescaleDB (applying the schema migrations on start) and each drone's latest state to Redis (`drone:<tenant>:<drone>`), with nothing lost or duplicated across a restart.
+- The ingester relays commands to drones from the socket it reads on, as a ground station (system 255, component 190), refusing any that have expired or whose drone it has not heard since it started. `-commands=false` makes it telemetry only.
 - SITL stream-rate parameters (`deploy/sitl/murmur-streams.parm`) so headless SITL sends position, attitude, system and battery status without a ground station.
 - `deploy/sitl/run-fleet.sh` to start several SITL drones sending straight to the ingester (by name or IP address), lined up south of `fakegen`'s grid so the two fleets can run together.
 - `docker compose --profile sitl up` (`make sitl`) adds 3 ArduCopter SITL drones to the stack. The first build compiles ArduPilot, about 5 minutes; plain `docker compose up` does not need it.
