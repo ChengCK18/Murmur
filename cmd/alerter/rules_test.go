@@ -91,6 +91,9 @@ func TestLinkLostAndRestored(t *testing.T) {
 	if len(r.active()) != 0 {
 		t.Errorf("active %v", r.active())
 	}
+	if s.got[1].Message != "Heartbeat back" {
+		t.Errorf("cleared with %q", s.got[1].Message)
+	}
 }
 
 func TestSilentDronesAreForgotten(t *testing.T) {

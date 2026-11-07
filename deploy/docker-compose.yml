@@ -1,8 +1,9 @@
 # Murmur (guide steps 2.1 and 2.9).
 #
 #   docker compose -f deploy/docker-compose.yml up -d --build
-#       everything: infrastructure, ingester, consumer, gateway with the map
-#       (http://localhost:8080), 10 fake drones, Prometheus
+#       everything: infrastructure, ingester, consumer, commander, alerter,
+#       gateway with the map (http://localhost:8080), 10 fake drones,
+#       Prometheus and Grafana (http://localhost:3000)
 #   docker compose -f deploy/docker-compose.yml --profile sitl up -d --build
 #       the same plus 3 SITL drones; the first build compiles ArduPilot
 #   docker compose -f deploy/docker-compose.yml up -d nats timescaledb redis
@@ -161,6 +162,7 @@ services:
     command:
       - -nats=nats://nats:4222
       - -redis=redis:6379
+      - -db=postgres://murmur:murmur@timescaledb:5432/murmur # for replay
       - -metrics=:9103
       - -web=/web # the map at http://localhost:8080
       - -password=murmur # the demo login, user "demo"; local default like the others here
@@ -185,7 +187,26 @@ services:
     depends_on: [ingester, consumer, commander, alerter, gateway]
     restart: unless-stopped
 
+  grafana:
+    image: grafana/grafana:13.2.5
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: murmur # local default, like the others here
+      GF_AUTH_ANONYMOUS_ENABLED: "true" # dashboards readable without logging in
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /var/lib/grafana/dashboards/pipeline.json
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+      GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    ports:
+      - "127.0.0.1:3000:3000"
+    depends_on: [prometheus, timescaledb]
+    restart: unless-stopped
+
 volumes:
   nats-data:
   pg-data:
   prometheus-data:
+  grafana-data:

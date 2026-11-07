@@ -1,0 +1,10 @@
+# Dashboards are files in deploy/grafana/dashboards (guide step 6.2). Changes
+# made in Grafana are not saved back: edit the JSON instead.
+apiVersion: 1
+providers:
+  - name: murmur
+    folder: Murmur
+    type: file
+    allowUiUpdates: false
+    options:
+      path: /var/lib/grafana/dashboards

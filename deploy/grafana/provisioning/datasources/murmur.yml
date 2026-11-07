@@ -1,0 +1,23 @@
+# Data sources for Murmur's dashboards (guide step 6.2), loaded at start.
+apiVersion: 1
+datasources:
+  - name: Prometheus
+    uid: prometheus
+    type: prometheus
+    access: proxy
+    url: http://prometheus:9090
+    isDefault: true
+    jsonData:
+      timeInterval: 5s # the scrape interval
+  - name: TimescaleDB
+    uid: timescaledb
+    type: grafana-postgresql-datasource
+    url: timescaledb:5432
+    user: murmur
+    jsonData:
+      database: murmur
+      sslmode: disable
+      timescaledb: true
+      postgresVersion: 1700
+    secureJsonData:
+      password: murmur # the local default, as in docker-compose.yml

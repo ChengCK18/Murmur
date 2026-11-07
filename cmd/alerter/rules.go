@@ -63,7 +63,7 @@ func (r *rules) observe(t schema.Telemetry) {
 		if t.ReceivedAt.After(w.lastHeartbeat) {
 			w.lastHeartbeat = t.ReceivedAt
 		}
-		r.set(t.DroneID, w, alert.LinkLost, false, "", t.ReceivedAt)
+		r.set(t.DroneID, w, alert.LinkLost, false, "Heartbeat back", t.ReceivedAt)
 	case *ardupilotmega.MessageSysStatus:
 		p := state.BatteryPercent(m.BatteryRemaining)
 		if p == nil {

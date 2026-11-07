@@ -38,6 +38,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The gateway sends every browser `{"type":"alert",...}` and `{"type":"geofence",...}`, and serves `GET /api/alerts`, `GET /api/geofence` and, logged in, `PUT /api/geofence`.
 - Alerts on the map: a list of the alerts raised now above the drone list, drones with an alert outlined in red, and a geofence drawn and removed on the map.
 - Flight replay: `GET /api/drones/{id}/history?from=&to=` on the gateway (`-db`) reads a drone's stored flight, thinned to about 3,000 points, and the drone's panel plays it back with a time scrubber at 1, 10 or 60 times speed.
+- Grafana on `http://localhost:3000`, provisioned from `deploy/grafana/`: a *Murmur pipeline* dashboard (rates, loss, queue lag, write time, both latency spans, commands) and a *Murmur fleet* dashboard (messages stored, alerts and the command log from TimescaleDB). Viewing needs no login.
 - SITL stream-rate parameters (`deploy/sitl/murmur-streams.parm`) so headless SITL sends position, attitude, system and battery status without a ground station.
 - `deploy/sitl/run-fleet.sh` to start several SITL drones sending straight to the ingester (by name or IP address), lined up south of `fakegen`'s grid so the two fleets can run together.
 - `docker compose --profile sitl up` (`make sitl`) adds 3 ArduCopter SITL drones to the stack. The first build compiles ArduPilot, about 5 minutes; plain `docker compose up` does not need it.
@@ -49,6 +50,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The consumer writes each batch in one statement, raising its limit from about 5,700 to about 14,000 rows a second.
 
 ### Fixed
+- A cleared link-lost alert now says "Heartbeat back" instead of nothing.
 - `fakegen` follows the ingester to a new IP address, which it can get when restarted; before, the drones kept sending to the old one until `fakegen` was restarted too.
 - The whole stack comes back after a reboot: NATS, TimescaleDB, Redis and Prometheus now have a restart policy, where before the services that need them restarted forever.
 - `murmur_ingester_frames_lost_total`, `murmur_ingester_link_losses_total` and the other link counters no longer fall when a drone is rebound to a new address.

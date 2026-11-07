@@ -23,7 +23,7 @@ failures: ## the failure tests against the running stack (about 10 minutes); kil
 infra: ## NATS, TimescaleDB and Redis only
 	$(COMPOSE) up -d --wait nats timescaledb redis
 
-up: ## the whole stack: the map at http://localhost:8080, 10 fake drones, Prometheus
+up: ## the whole stack: the map at http://localhost:8080, Grafana at :3000, 10 fake drones
 	$(COMPOSE) up -d --build --wait
 
 sitl: ## the whole stack plus 3 SITL drones; the first build compiles ArduPilot
