@@ -72,7 +72,7 @@ func (r *relay) handle(data []byte) {
 		r.report(c, command.Unreachable)
 		return
 	}
-	m, err := c.Long(target.sysID, target.compID)
+	m, err := c.Message(target.sysID, target.compID)
 	if err != nil {
 		log.Printf("relay: command %s: %v", c.CommandID, err)
 		r.unreachable.Add(1)
@@ -133,9 +133,16 @@ func (r *relay) reply(rep command.Reply) {
 
 // forward passes on a drone's answer to a command.
 func (r *relay) forward(id registry.ID, m message.Message) {
-	if ack, ok := m.(*ardupilotmega.MessageCommandAck); ok {
+	switch m := m.(type) {
+	case *ardupilotmega.MessageCommandAck:
 		r.reply(command.Reply{DroneID: int64(id), Ack: &command.Ack{
-			Command: uint16(ack.Command), Result: uint8(ack.Result), Progress: ack.Progress,
+			Command: uint16(m.Command), Result: uint8(m.Result), Progress: m.Progress,
 		}})
+	case *ardupilotmega.MessageMissionRequestInt:
+		r.reply(command.Reply{DroneID: int64(id), Mission: &command.MissionEvent{Seq: int(m.Seq)}})
+	case *ardupilotmega.MessageMissionRequest: // the older form of the same request
+		r.reply(command.Reply{DroneID: int64(id), Mission: &command.MissionEvent{Seq: int(m.Seq)}})
+	case *ardupilotmega.MessageMissionAck:
+		r.reply(command.Reply{DroneID: int64(id), Mission: &command.MissionEvent{Ack: true, Result: uint8(m.Type)}})
 	}
 }

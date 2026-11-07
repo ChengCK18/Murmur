@@ -10,6 +10,7 @@ import (
 
 	"github.com/bluenviron/gomavlib/v3/pkg/dialects/ardupilotmega"
 	"github.com/bluenviron/gomavlib/v3/pkg/dialects/common"
+	"github.com/bluenviron/gomavlib/v3/pkg/message"
 
 	"github.com/ChengCK18/murmur/internal/command"
 	"github.com/ChengCK18/murmur/internal/mavlink"
@@ -151,5 +152,40 @@ func TestRelayForwardsAcks(t *testing.T) {
 	if got.DroneID != int64(id) || got.Ack == nil || got.Ack.Result != uint8(ardupilotmega.MAV_RESULT_DENIED) ||
 		got.Ack.Command != uint16(common.MAV_CMD_COMPONENT_ARM_DISARM) {
 		t.Errorf("reply %+v, ack %+v", got, got.Ack)
+	}
+}
+
+func TestRelayCarriesAnUpload(t *testing.T) {
+	r, w, id := flown(t)
+	r.in.relay = r
+	expires := time.Now().Add(time.Second)
+	for _, c := range []command.Command{
+		command.CountCommand(command.Command{CommandID: "c1", DroneID: int64(id), Attempt: 1, ExpiresAt: expires}, 3),
+		command.ItemCommand(command.Command{CommandID: "c1", DroneID: int64(id), Attempt: 2, ExpiresAt: expires}, command.Item{Seq: 1, Command: 16, Frame: 3, Lat: -35, Lon: 149, Alt: 20}),
+	} {
+		b, _ := json.Marshal(c)
+		r.handle(b)
+	}
+	dec, _ := mavlink.NewDecoder()
+	count, _ := dec.Decode(time.Now(), droneAddr, w.packets[0])
+	item, _ := dec.Decode(time.Now(), droneAddr, w.packets[1])
+	if m, ok := count[0].Msg.(*ardupilotmega.MessageMissionCount); !ok || m.Count != 3 {
+		t.Errorf("first packet %+v", count[0].Msg)
+	}
+	if m, ok := item[0].Msg.(*ardupilotmega.MessageMissionItemInt); !ok || m.Seq != 1 {
+		t.Errorf("second packet %+v", item[0].Msg)
+	}
+
+	w.replies = nil
+	for _, m := range []message.Message{
+		&ardupilotmega.MessageMissionRequestInt{Seq: 2},
+		&ardupilotmega.MessageMissionRequest{Seq: 1},
+		&ardupilotmega.MessageMissionAck{Type: ardupilotmega.MAV_MISSION_NO_SPACE},
+	} {
+		r.in.handle(mavlink.Received{ReceivedAt: time.Now(), Src: droneAddr, SysID: 7, CompID: 1, Msg: m})
+	}
+	if len(w.replies) != 3 || w.replies[0].Mission.Seq != 2 || w.replies[1].Mission.Seq != 1 ||
+		!w.replies[2].Mission.Ack || w.replies[2].Mission.Result != uint8(ardupilotmega.MAV_MISSION_NO_SPACE) {
+		t.Errorf("%+v", w.replies)
 	}
 }

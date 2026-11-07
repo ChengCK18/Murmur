@@ -57,23 +57,25 @@ type flight struct {
 }
 
 type service struct {
-	publish func(subject string, data []byte) error
-	store   store
-	check   func(context.Context, command.Request) string // why a drone cannot take a command; "": it can
-	timing  timing
-	now     func() time.Time
-	obs     func(status string) // every final status; nil: none
+	publish  func(subject string, data []byte) error
+	store    store
+	missions missionStore                                  // nil: not recorded
+	check    func(context.Context, command.Request) string // why a drone cannot take a command; "": it can
+	timing   timing
+	now      func() time.Time
+	obs      func(status string) // every final status; nil: none
 
-	mu     sync.Mutex
-	flying map[key]*flight
-	byID   map[string]*flight
-	wg     sync.WaitGroup
+	mu      sync.Mutex
+	flying  map[key]*flight
+	byID    map[string]*flight
+	uploads map[int64]*upload // by drone
+	wg      sync.WaitGroup
 }
 
 func newService(publish func(string, []byte) error, s store, t timing) *service {
 	return &service{publish: publish, store: s, timing: t, now: time.Now,
 		check:  func(context.Context, command.Request) string { return "" },
-		flying: map[key]*flight{}, byID: map[string]*flight{}}
+		flying: map[key]*flight{}, byID: map[string]*flight{}, uploads: map[int64]*upload{}}
 }
 
 // submit starts a command and returns its first status. A command it refuses
@@ -97,6 +99,9 @@ func (s *service) submit(ctx context.Context, req command.Request) command.Updat
 		return refuse("could not start the command")
 	}
 	c.CommandID = id
+	if s.uploading(c.DroneID) {
+		return s.refused(ctx, c, "a mission upload is in progress")
+	}
 	if reason := s.check(ctx, req); reason != "" {
 		return s.refused(ctx, c, reason)
 	}
@@ -196,6 +201,14 @@ func (s *service) land(k key, f *flight) {
 // a command no longer tracked is dropped: that attempt is already decided.
 func (s *service) reply(r command.Reply) {
 	s.mu.Lock()
+	if u := s.uploads[r.DroneID]; u != nil && (r.Mission != nil || r.CommandID == u.c.CommandID) {
+		s.mu.Unlock()
+		select {
+		case u.replies <- r:
+		default: // a drone repeating itself: the next request or timeout covers it
+		}
+		return
+	}
 	var f *flight
 	if r.Ack != nil {
 		f = s.flying[key{r.DroneID, common.MAV_CMD(r.Ack.Command)}]

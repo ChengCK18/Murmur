@@ -42,7 +42,7 @@ func TestCommandsReachASITLDrone(t *testing.T) {
 	_, dbURL := dbtest.NewURL(t)
 	redisURL, _ := spareRedis(t)
 	udp := freeUDPPort(t)
-	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 
 	ingesterArgs := []string{"-listen", udp, "-nats", natsURL, "-db", dbURL, "-metrics", "", "-interval", "1h"}
@@ -57,10 +57,45 @@ func TestCommandsReachASITLDrone(t *testing.T) {
 	defer nc.Close()
 
 	// The drone's ID and armed state, from its heartbeats.
-	var drone, armed, beats atomic.Int64
+	var drone, armed, beats, reached, lat, lon atomic.Int64
+	reached.Store(-1)
+	var usingGPS atomic.Bool
 	if _, err := nc.Subscribe("telemetry.*", func(m *nats.Msg) {
 		var tm schema.Telemetry
-		if json.Unmarshal(m.Data, &tm) != nil || tm.Msg != "HEARTBEAT" {
+		if json.Unmarshal(m.Data, &tm) != nil {
+			return
+		}
+		switch tm.Msg {
+		case "MISSION_ITEM_REACHED":
+			var p struct {
+				Seq int64 `json:"seq"`
+			}
+			if json.Unmarshal(tm.Payload, &p) == nil {
+				reached.Store(p.Seq)
+			}
+			return
+		case "GLOBAL_POSITION_INT":
+			var p struct {
+				Lat, Lon int64
+			}
+			if json.Unmarshal(tm.Payload, &p) == nil {
+				lat.Store(p.Lat)
+				lon.Store(p.Lon)
+			}
+			return
+		case "STATUSTEXT":
+			var p struct {
+				Text string `json:"text"`
+			}
+			if json.Unmarshal(tm.Payload, &p) == nil {
+				t.Log("drone says: " + p.Text)
+				if strings.Contains(p.Text, "is using GPS") {
+					usingGPS.Store(true)
+				}
+			}
+			return
+		case "HEARTBEAT":
+		default:
 			return
 		}
 		var hb struct {
@@ -172,6 +207,46 @@ func TestCommandsReachASITLDrone(t *testing.T) {
 		t.Fatalf("arm after the restart: %+v", u)
 	}
 	waitFor(t, ctx, "a heartbeat showing armed again", func() bool { return armed.Load() == 1 })
+
+	// A mission, from the handshake to the drone flying it: two points about
+	// 30 m apart near where it stands.
+	here := command.Waypoint{Lat: float64(lat.Load()) / 1e7, Lon: float64(lon.Load()) / 1e7}
+	data, _ := json.Marshal(command.MissionRequest{DroneID: id, AltitudeM: 10, IssuedBy: "integration", Waypoints: []command.Waypoint{
+		{Lat: here.Lat + 0.0002, Lon: here.Lon}, {Lat: here.Lat + 0.0002, Lon: here.Lon + 0.0003},
+	}})
+	m, err := nc.Request(command.MissionSubject, data, 2*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var first command.Update
+	if err := json.Unmarshal(m.Data, &first); err != nil || first.Status != command.Pending {
+		t.Fatalf("upload refused: %+v, err %v", first, err)
+	}
+	select {
+	case u = <-finals:
+	case <-time.After(10 * time.Second):
+		t.Fatal("the upload never ended")
+	}
+	if u.Type != command.Upload || u.Status != command.Accepted {
+		t.Fatalf("upload: %+v", u)
+	}
+	t.Logf("mission uploaded in %d packets", u.Attempts)
+
+	// ArduPilot refuses AUTO until the EKF is using GPS, some time after it
+	// allows arming, and disarms by itself if left idle on the ground.
+	waitFor(t, ctx, "the EKF to use GPS", func() bool { return usingGPS.Load() })
+	if armed.Load() == 0 {
+		if u = issue(command.Arm); u.Status != command.Accepted {
+			t.Fatalf("arm: %+v", u)
+		}
+		waitFor(t, ctx, "a heartbeat showing armed", func() bool { return armed.Load() == 1 })
+	}
+	time.Sleep(1500 * time.Millisecond) // armed reaches Redis, and so the precondition
+	if u = issue(command.MissionStart); u.Status != command.Accepted {
+		t.Fatalf("start mission: %+v", u)
+	}
+	const lastWaypoint = 3 // home, takeoff, then the two points
+	waitFor(t, ctx, "the drone to reach the last waypoint", func() bool { return reached.Load() >= lastWaypoint })
 }
 
 // TestFleetCommandEndsForEveryDrone sends return to launch to 20 fake drones

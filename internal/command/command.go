@@ -91,6 +91,9 @@ const (
 type Params struct {
 	AltitudeM float64 `json:"altitude_m,omitempty"` // takeoff
 	Mode      string  `json:"mode,omitempty"`       // set_mode
+
+	Count int   `json:"count,omitempty"` // a mission upload's item count
+	Item  *Item `json:"item,omitempty"`  // one item of it
 }
 
 // Request is what the gateway asks for on behalf of a logged-in user.
@@ -149,13 +152,14 @@ type Ack struct {
 
 // Reply is the message on command_reply.<drone_id>: either the ingester
 // reporting what it did with an attempt (Status Sent, Expired or Unreachable,
-// with the CommandID), or a drone's Ack.
+// with the CommandID), or a drone's Ack or MissionEvent.
 type Reply struct {
-	DroneID   int64  `json:"drone_id"`
-	CommandID string `json:"command_id,omitempty"`
-	Attempt   int    `json:"attempt,omitempty"`
-	Status    string `json:"status,omitempty"`
-	Ack       *Ack   `json:"ack,omitempty"`
+	DroneID   int64         `json:"drone_id"`
+	CommandID string        `json:"command_id,omitempty"`
+	Attempt   int           `json:"attempt,omitempty"`
+	Status    string        `json:"status,omitempty"`
+	Ack       *Ack          `json:"ack,omitempty"`
+	Mission   *MissionEvent `json:"mission,omitempty"`
 }
 
 // Update is the message on command_status.<drone_id>.

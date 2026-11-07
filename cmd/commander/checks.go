@@ -49,6 +49,9 @@ func precondition(typ string, d *state.Drone) string {
 type checker struct {
 	rdb    *redis.Client
 	tenant int64
+	store  interface {
+		mission(context.Context, int64) (*command.MissionView, error)
+	}
 }
 
 func (c checker) check(ctx context.Context, req command.Request) string {
@@ -68,5 +71,18 @@ func (c checker) check(ctx context.Context, req command.Request) string {
 		log.Printf("drone %d state: %v", req.DroneID, err)
 		return "the drone's state is not available"
 	}
-	return precondition(req.Type, d)
+	if reason := precondition(req.Type, d); reason != "" {
+		return reason
+	}
+	if req.Type == command.MissionStart {
+		m, err := c.store.mission(ctx, req.DroneID)
+		if err != nil {
+			log.Print(err)
+			return "the drone's mission is not available"
+		}
+		if m == nil || m.Status != "uploaded" {
+			return "Start mission needs a mission uploaded to the drone"
+		}
+	}
+	return ""
 }

@@ -76,7 +76,8 @@ func run(ctx context.Context, natsURL, dbURL, redisAddr string, tenant int64, me
 	defer nc.Close()
 
 	s := newService(nc.Publish, st, planTiming)
-	s.check = checker{rdb: rdb, tenant: tenant}.check
+	s.check = checker{rdb: rdb, tenant: tenant, store: st}.check
+	s.missions = st
 	for _, u := range unknown {
 		s.tell(u)
 	}
@@ -123,6 +124,35 @@ func run(ctx context.Context, natsURL, dbURL, redisAddr string, tenant int64, me
 		if err != nil {
 			log.Printf("answering a fleet request: %v", err)
 		}
+	}); err != nil {
+		return err
+	}
+	if _, err := nc.Subscribe(command.MissionSubject, func(m *nats.Msg) {
+		go func() {
+			var req command.MissionRequest
+			u := command.Update{Status: command.Rejected, Reason: "bad request"}
+			if err := json.Unmarshal(m.Data, &req); err == nil {
+				u = s.submitMission(ctx, req)
+			}
+			respond(m, u)
+		}()
+	}); err != nil {
+		return err
+	}
+	if _, err := nc.Subscribe(command.MissionGetSubject, func(m *nats.Msg) {
+		go func() {
+			var req command.MissionGet
+			if err := json.Unmarshal(m.Data, &req); err != nil {
+				log.Printf("bad mission request: %v", err)
+				return
+			}
+			v, err := st.mission(ctx, req.DroneID)
+			if err != nil {
+				log.Print(err)
+				return // the gateway's request times out and it reports that
+			}
+			respond(m, v)
+		}()
 	}); err != nil {
 		return err
 	}
@@ -175,5 +205,15 @@ func recent(ctx context.Context, st pgStore, m *nats.Msg) {
 	}
 	if err != nil {
 		log.Printf("answering for recent commands: %v", err)
+	}
+}
+
+func respond(m *nats.Msg, v any) {
+	data, err := json.Marshal(v)
+	if err == nil {
+		err = m.Respond(data)
+	}
+	if err != nil {
+		log.Printf("answering on %s: %v", m.Subject, err)
 	}
 }

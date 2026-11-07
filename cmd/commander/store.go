@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 
 	"github.com/jackc/pgx/v5"
@@ -54,6 +55,7 @@ func (s pgStore) markUnknown(ctx context.Context) ([]command.Update, error) {
 	if err != nil {
 		return nil, fmt.Errorf("commands unknown: %w", err)
 	}
+	defer rows.Close()
 	return pgx.CollectRows(rows, scanUpdate)
 }
 
@@ -65,6 +67,47 @@ func (s pgStore) recent(ctx context.Context, droneID int64, limit int) ([]comman
 		return nil, fmt.Errorf("commands recent: %w", err)
 	}
 	return pgx.CollectRows(rows, scanUpdate)
+}
+
+func (s pgStore) insertMission(ctx context.Context, c command.Command, r command.MissionRequest) error {
+	points, err := json.Marshal(r.Waypoints)
+	if err != nil {
+		return err
+	}
+	_, err = s.pool.Exec(ctx, `INSERT INTO missions
+		(id, tenant_id, drone_id, waypoints, altitude_m, status, issued_by, created_at, updated_at)
+		VALUES ($1::uuid, $2, $3, $4::jsonb, $5, 'uploading', $6, $7, $7)`,
+		c.CommandID, s.tenant, c.DroneID, string(points), r.AltitudeM, c.IssuedBy, c.IssuedAt)
+	if err != nil {
+		return fmt.Errorf("missions insert: %w", err)
+	}
+	return nil
+}
+
+func (s pgStore) finishMission(ctx context.Context, id string, uploaded bool) error {
+	status := "failed"
+	if uploaded {
+		status = "uploaded"
+	}
+	if _, err := s.pool.Exec(ctx, `UPDATE missions SET status = $2, updated_at = now() WHERE id = $1::uuid`, id, status); err != nil {
+		return fmt.Errorf("missions update: %w", err)
+	}
+	return nil
+}
+
+// mission returns a drone's newest mission, or nil.
+func (s pgStore) mission(ctx context.Context, droneID int64) (*command.MissionView, error) {
+	var v command.MissionView
+	var points []byte
+	err := s.pool.QueryRow(ctx, `SELECT waypoints, altitude_m, status FROM missions
+		WHERE drone_id = $1 ORDER BY created_at DESC LIMIT 1`, droneID).Scan(&points, &v.AltitudeM, &v.Status)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("missions get: %w", err)
+	}
+	return &v, json.Unmarshal(points, &v.Waypoints)
 }
 
 // fleet returns every command of a fleet command.
