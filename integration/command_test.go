@@ -34,16 +34,18 @@ func TestCommandsReachASITLDrone(t *testing.T) {
 	}
 	repo, _ := filepath.Abs("..")
 
-	bin := build(t, "ingester", "commander")
+	bin := build(t, "ingester", "commander", "consumer")
 	natsURL := natstest.Start(t)
 	_, dbURL := dbtest.NewURL(t)
+	redisURL, _ := spareRedis(t)
 	udp := freeUDPPort(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Minute)
 	defer cancel()
 
 	ingesterArgs := []string{"-listen", udp, "-nats", natsURL, "-db", dbURL, "-metrics", "", "-interval", "1h"}
 	ingester := start(t, bin, "ingester", ingesterArgs...)
-	start(t, bin, "commander", "-nats", natsURL, "-db", dbURL, "-metrics", "")
+	start(t, bin, "consumer", "-nats", natsURL, "-db", dbURL, "-redis", redisURL, "-metrics", "", "-interval", "1h")
+	start(t, bin, "commander", "-nats", natsURL, "-db", dbURL, "-redis", redisURL, "-metrics", "")
 
 	nc, err := nats.Connect(natsURL)
 	if err != nil {

@@ -25,6 +25,9 @@ const (
 	// RequestSubject is where the gateway sends a Request, by NATS request and
 	// reply. The answer is the first Update.
 	RequestSubject = "command_request"
+	// RecentSubject answers a RecentRequest with a drone's latest commands, so
+	// a reconnected browser can show them again.
+	RecentSubject = "command_recent"
 	// Subjects is what the ingester subscribes to.
 	Subjects = "command.*"
 	// ReplySubjects is what the commander subscribes to.
@@ -90,6 +93,12 @@ type Request struct {
 	Type     string `json:"type"`
 	Params   Params `json:"params"`
 	IssuedBy string `json:"issued_by"`
+}
+
+// RecentRequest asks for a drone's latest commands, newest first.
+type RecentRequest struct {
+	DroneID int64 `json:"drone_id"`
+	Limit   int   `json:"limit"`
 }
 
 // Command is the message on command.<drone_id>.

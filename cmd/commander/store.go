@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/ChengCK18/murmur/internal/command"
@@ -42,15 +43,39 @@ func (s pgStore) update(ctx context.Context, u command.Update) error {
 	return nil
 }
 
-// markUnknown closes commands a previous run was still tracking. Whether the
-// drone carried them out can no longer be told from here, so the UI points at
-// its state, which telemetry still shows (plan §4).
-func (s pgStore) markUnknown(ctx context.Context) (int64, error) {
-	tag, err := s.pool.Exec(ctx, `UPDATE commands
+// markUnknown closes commands a previous run was still tracking and returns
+// them. Whether the drone carried them out can no longer be told from here, so
+// the UI points at its state, which telemetry still shows (plan §4).
+func (s pgStore) markUnknown(ctx context.Context) ([]command.Update, error) {
+	rows, err := s.pool.Query(ctx, `UPDATE commands
 		SET status = $1, reason = 'the command service restarted', updated_at = now()
-		WHERE status IN ($2, $3)`, command.Unknown, command.Pending, command.Sent)
+		WHERE status IN ($2, $3)
+		RETURNING `+updateColumns, command.Unknown, command.Pending, command.Sent)
 	if err != nil {
-		return 0, fmt.Errorf("commands unknown: %w", err)
+		return nil, fmt.Errorf("commands unknown: %w", err)
 	}
-	return tag.RowsAffected(), nil
+	return pgx.CollectRows(rows, scanUpdate)
+}
+
+// recent returns a drone's latest commands, newest first.
+func (s pgStore) recent(ctx context.Context, droneID int64, limit int) ([]command.Update, error) {
+	rows, err := s.pool.Query(ctx, `SELECT `+updateColumns+` FROM commands
+		WHERE drone_id = $1 ORDER BY issued_at DESC LIMIT $2`, droneID, limit)
+	if err != nil {
+		return nil, fmt.Errorf("commands recent: %w", err)
+	}
+	return pgx.CollectRows(rows, scanUpdate)
+}
+
+const updateColumns = `id::text, drone_id, type, status, COALESCE(reason, ''), attempts, mav_result, issued_by, updated_at`
+
+func scanUpdate(row pgx.CollectableRow) (command.Update, error) {
+	var u command.Update
+	var result *int16
+	err := row.Scan(&u.CommandID, &u.DroneID, &u.Type, &u.Status, &u.Reason, &u.Attempts, &result, &u.IssuedBy, &u.At)
+	if result != nil {
+		r := uint8(*result)
+		u.MavResult = &r
+	}
+	return u, err
 }

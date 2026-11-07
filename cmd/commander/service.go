@@ -56,6 +56,7 @@ type flight struct {
 type service struct {
 	publish func(subject string, data []byte) error
 	store   store
+	check   func(context.Context, command.Request) string // why a drone cannot take a command; "": it can
 	timing  timing
 	now     func() time.Time
 	obs     func(status string) // every final status; nil: none
@@ -68,6 +69,7 @@ type service struct {
 
 func newService(publish func(string, []byte) error, s store, t timing) *service {
 	return &service{publish: publish, store: s, timing: t, now: time.Now,
+		check:  func(context.Context, command.Request) string { return "" },
 		flying: map[key]*flight{}, byID: map[string]*flight{}}
 }
 
@@ -92,6 +94,9 @@ func (s *service) submit(ctx context.Context, req command.Request) command.Updat
 		return refuse("could not start the command")
 	}
 	c.CommandID = id
+	if reason := s.check(ctx, req); reason != "" {
+		return s.refused(ctx, c, reason)
+	}
 
 	mav, _ := command.MavCommand(c.Type)
 	k := key{c.DroneID, mav}
@@ -120,7 +125,9 @@ func (s *service) refused(ctx context.Context, c command.Command, reason string)
 		log.Printf("command %s not recorded: %v", c.CommandID, err)
 	}
 	s.count(command.Rejected)
-	return s.update(c, command.Rejected, reason, 0, nil)
+	u := s.update(c, command.Rejected, reason, 0, nil)
+	s.tell(u) // other browsers watching this drone see it too
+	return u
 }
 
 func (s *service) count(status string) {
@@ -277,6 +284,10 @@ func (s *service) report(u command.Update) {
 	if err := s.store.update(ctx, u); err != nil {
 		log.Printf("command %s: recording %s: %v", u.CommandID, u.Status, err)
 	}
+	s.tell(u)
+}
+
+func (s *service) tell(u command.Update) {
 	data, err := json.Marshal(u)
 	if err == nil {
 		err = s.publish(command.StatusSubject(u.DroneID), data)
