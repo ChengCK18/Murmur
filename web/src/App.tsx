@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AlertList } from "./AlertList";
 import { Alerts } from "./alerts";
 import { CommandPanel } from "./CommandPanel";
@@ -8,6 +8,8 @@ import { Drones } from "./drones";
 import { DroneList } from "./DroneList";
 import { DroneMap } from "./DroneMap";
 import { FleetBar } from "./FleetBar";
+import { type Flight, flight as toFlight, type History, pointAt, track } from "./history";
+import { Replay } from "./Replay";
 import type { Alert, BBox, CommandParams, CommandType, CommandUpdate, DroneState, Fence, Mission, Waypoint } from "./types";
 
 const LIST_EVERY = 10_000; // ms between refreshes of the whole fleet's list
@@ -32,6 +34,8 @@ export function App() {
   const [alerted, setAlerted] = useState<Set<number>>(new Set());
   const [fence, setFence] = useState<Waypoint[]>([]);
   const [drawing, setDrawing] = useState<Waypoint[] | null>(null);
+  const [replay, setReplay] = useState<Flight | null>(null);
+  const [replayTime, setReplayTime] = useState(0);
   const [plan, setPlan] = useState<Waypoint[]>([]);
   const [planning, setPlanning] = useState(false);
   const [fleet, setFleet] = useState<FleetView | null>(null);
@@ -209,6 +213,7 @@ export function App() {
   // The selected drone stays live wherever the map is.
   useEffect(() => {
     showLog();
+    setReplay(null);
     setMission(null);
     setPlan([]);
     setPlanning(false);
@@ -283,6 +288,28 @@ export function App() {
     }
   }, []);
   const clearPlan = useCallback(() => setPlan([]), []);
+
+  const loadReplay = useCallback(async (minutes: number): Promise<string> => {
+    const id = selectedRef.current;
+    if (id === null) return "";
+    const to = new Date();
+    const from = new Date(to.getTime() - minutes * 60_000);
+    try {
+      const res = await fetch(`/api/drones/${id}/history?from=${from.toISOString()}&to=${to.toISOString()}`);
+      const body = (await res.json()) as History & { error?: string };
+      if (!res.ok) return body.error ?? "Could not load the flight";
+      if (selectedRef.current !== id) return "";
+      const f = toFlight(body);
+      setReplay(f);
+      setReplayTime(f.start);
+      return "";
+    } catch {
+      return "Could not reach the gateway";
+    }
+  }, []);
+  const closeReplay = useCallback(() => setReplay(null), []);
+  const replayPoint = replay ? pointAt(replay, replayTime) : undefined;
+  const replayTrack = useMemo(() => (replay ? track(replay) : []), [replay]);
 
   const sendFleet = useCallback(
     (type: CommandType) => {
@@ -361,6 +388,8 @@ export function App() {
           planning={planning || drawing !== null}
           onPick={addWaypoint}
           alerted={alerted}
+          replayTrack={replayTrack}
+          replayAt={replayPoint ? { lat: replayPoint.lat, lon: replayPoint.lon } : null}
         />
         {drone && checked && (
           <CommandPanel
@@ -377,6 +406,7 @@ export function App() {
             onPlanning={setPlanning}
             onClearPlan={clearPlan}
             onUpload={upload}
+            replay={<Replay flight={replay} at={replayTime} onLoad={loadReplay} onSeek={setReplayTime} onClose={closeReplay} />}
           />
         )}
       </div>

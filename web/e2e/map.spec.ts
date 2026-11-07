@@ -126,3 +126,33 @@ test("drones whose link is lost turn grey, and recover", async ({ page }) => {
   const back = await page.locator(LIVE).evaluateAll((els) => els.map((e) => (e as HTMLElement).dataset.droneId));
   expect(back.sort()).toEqual(live.sort());
 });
+
+test("a drone's flight replays from stored data", async ({ page }) => {
+  await page.goto("/");
+  await expect(page.locator(LIVE)).toHaveCount(DRONES, { timeout: 20_000 });
+  const id = await firstDrone(page);
+  await page.locator(`.list li[data-drone-id="${id}"]`).click();
+  await page.getByRole("button", { name: "Load" }).click();
+
+  const info = page.getByTestId("replay-point");
+  await expect(info).toBeVisible();
+  expect(Number(await info.getAttribute("data-points"))).toBeGreaterThan(5);
+  const ghost = page.locator(".replay-ghost");
+  const where = async () => `${await ghost.getAttribute("data-lat")},${await ghost.getAttribute("data-lon")}`;
+
+  // Scrub from the start to the end: the ghost moves, and says what it was doing.
+  const scrubber = page.getByLabel("Replay time");
+  await scrubber.fill(await scrubber.getAttribute("min") as string);
+  const start = await where();
+  await scrubber.fill(await scrubber.getAttribute("max") as string);
+  await expect.poll(where).not.toBe(start);
+  await expect(info).toContainText(/AUTO|RTL|LAND|GUIDED/);
+
+  // Play runs forward on its own.
+  await scrubber.fill(await scrubber.getAttribute("min") as string);
+  const before = await scrubber.inputValue();
+  await page.getByRole("button", { name: "Play" }).click();
+  await expect.poll(() => scrubber.inputValue()).not.toBe(before);
+  await page.getByRole("button", { name: "Close" }).click();
+  await expect(ghost).toHaveCount(0);
+});

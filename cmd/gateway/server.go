@@ -13,6 +13,7 @@ import (
 
 	"github.com/coder/websocket"
 	"github.com/coder/websocket/wsjson"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/nats-io/nats.go"
 	"github.com/nats-io/nats.go/jetstream"
 
@@ -28,9 +29,10 @@ type server struct {
 	hub      *hub
 	nc       *nats.Conn
 	throttle time.Duration
-	origins  []string // allowed WebSocket origins besides the gateway's own
-	web      string   // built web app to serve, or ""
-	commands bool     // the command path is on (decision 13)
+	origins  []string      // allowed WebSocket origins besides the gateway's own
+	web      string        // built web app to serve, or ""
+	commands bool          // the command path is on (decision 13)
+	pool     *pgxpool.Pool // TimescaleDB, for replay; nil: no replay
 	sessions sessions
 	counts   counters
 	clients  atomic.Int64
@@ -45,6 +47,7 @@ func (s *server) routes() http.Handler {
 	mux.HandleFunc("POST /api/logout", s.handleLogout)
 	mux.HandleFunc("GET /api/session", s.handleSession)
 	mux.HandleFunc("GET /api/alerts", s.handleAlerts)
+	mux.HandleFunc("GET /api/drones/{id}/history", s.handleHistory)
 	mux.HandleFunc("GET /api/geofence", s.handleGeofence)
 	mux.HandleFunc("PUT /api/geofence", s.handleSetGeofence)
 	if s.commands {

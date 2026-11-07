@@ -37,6 +37,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `cmd/alerter` (metrics on `:9105`): its own durable consumer on `TELEMETRY` raises and clears low battery (`-low-battery`, default 20%), link lost and geofence breach alerts, writes them to a new `events` table and publishes them on `alert.<drone_id>`. The geofence is kept in a `geofences` table and checked by the platform, so it works for every drone.
 - The gateway sends every browser `{"type":"alert",...}` and `{"type":"geofence",...}`, and serves `GET /api/alerts`, `GET /api/geofence` and, logged in, `PUT /api/geofence`.
 - Alerts on the map: a list of the alerts raised now above the drone list, drones with an alert outlined in red, and a geofence drawn and removed on the map.
+- Flight replay: `GET /api/drones/{id}/history?from=&to=` on the gateway (`-db`) reads a drone's stored flight, thinned to about 3,000 points, and the drone's panel plays it back with a time scrubber at 1, 10 or 60 times speed.
 - SITL stream-rate parameters (`deploy/sitl/murmur-streams.parm`) so headless SITL sends position, attitude, system and battery status without a ground station.
 - `deploy/sitl/run-fleet.sh` to start several SITL drones sending straight to the ingester (by name or IP address), lined up south of `fakegen`'s grid so the two fleets can run together.
 - `docker compose --profile sitl up` (`make sitl`) adds 3 ArduCopter SITL drones to the stack. The first build compiles ArduPilot, about 5 minutes; plain `docker compose up` does not need it.

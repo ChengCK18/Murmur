@@ -17,6 +17,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/nats-io/nats.go/jetstream"
 	"github.com/redis/go-redis/v9"
 
@@ -27,6 +28,7 @@ import (
 
 type config struct {
 	listen, natsURL, redisURL, metricsAddr, web string
+	dbURL                                       string
 	origins                                     []string
 	tenant                                      int64
 	throttle, timeout, stale                    time.Duration
@@ -40,6 +42,7 @@ func main() {
 	var origins string
 	flag.StringVar(&cfg.listen, "listen", ":8080", "HTTP address for the WebSocket and REST API")
 	flag.StringVar(&cfg.natsURL, "nats", "nats://127.0.0.1:4222", "NATS server")
+	flag.StringVar(&cfg.dbURL, "db", "", `TimescaleDB, for replay; "" for no replay`)
 	flag.StringVar(&cfg.redisURL, "redis", "127.0.0.1:6379", "Redis address, or a redis:// URL")
 	flag.StringVar(&cfg.metricsAddr, "metrics", ":9103", `address to serve Prometheus /metrics on; "" for none`)
 	flag.StringVar(&cfg.web, "web", "", "directory of the built web app to serve at /; \"\" for none")
@@ -95,10 +98,20 @@ func run(ctx context.Context, cfg config, ready chan<- string) error {
 		return err
 	}
 
+	var pool *pgxpool.Pool
+	if cfg.dbURL != "" {
+		// Lazy: the gateway serves the live map whether or not the database is
+		// up, and replay starts working when it is.
+		if pool, err = pgxpool.New(ctx, cfg.dbURL); err != nil {
+			return fmt.Errorf("db: %w", err)
+		}
+		defer pool.Close()
+	}
+
 	h := newHub(cfg.tenant, cfg.timeout, cfg.maxSubs, rdb)
 	h.stale = cfg.stale
 	s := &server{hub: h, nc: nc, throttle: cfg.throttle, origins: cfg.origins, web: cfg.web, commands: cfg.commands,
-		sessions: sessions{rdb: rdb, user: cfg.user, password: cfg.password}}
+		sessions: sessions{rdb: rdb, user: cfg.user, password: cfg.password}, pool: pool}
 	if cfg.commands {
 		if err := runStatus(nc, h); err != nil {
 			return err

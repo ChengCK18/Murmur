@@ -25,16 +25,19 @@ interface Props {
   planning: boolean; // clicks on the map add points
   onPick(p: Waypoint): void;
   alerted: Set<number>; // drones with an alert
+  replayTrack: Waypoint[];
+  replayAt: Waypoint | null;
 }
 
 const ROUTE = "mission-route";
 const FENCE = "geofence";
+const TRACK = "replay-track";
 
 // DroneMap draws one marker per drone with a position: an arrow turned to
 // the heading, labelled with altitude and battery, grey once the link is lost.
 // It reports the area it shows whenever that changes, so the page follows only
 // the drones on screen.
-export function DroneMap({ drones, selected, onSelect, onArea, route, fence, planning, onPick, alerted }: Props) {
+export function DroneMap({ drones, selected, onSelect, onArea, route, fence, planning, onPick, alerted, replayTrack, replayAt }: Props) {
   const container = useRef<HTMLDivElement>(null);
   const map = useRef<MapLibreMap | null>(null);
   const markers = useRef(new Map<number, Marker>());
@@ -46,6 +49,9 @@ export function DroneMap({ drones, selected, onSelect, onArea, route, fence, pla
   routeRef.current = route;
   const fenceRef = useRef(fence);
   fenceRef.current = fence;
+  const trackRef = useRef(replayTrack);
+  trackRef.current = replayTrack;
+  const ghost = useRef<Marker | null>(null);
   const pick = useRef<((p: Waypoint) => void) | null>(null);
   pick.current = planning ? onPick : null;
 
@@ -57,6 +63,8 @@ export function DroneMap({ drones, selected, onSelect, onArea, route, fence, pla
       m.addSource(FENCE, { type: "geojson", data: fenceArea(fenceRef.current) });
       m.addLayer({ id: `${FENCE}-fill`, type: "fill", source: FENCE, paint: { "fill-color": "#1f6feb", "fill-opacity": 0.06 } });
       m.addLayer({ id: `${FENCE}-line`, type: "line", source: FENCE, paint: { "line-color": "#1f6feb", "line-width": 2 } });
+      m.addSource(TRACK, { type: "geojson", data: routeLine(trackRef.current) });
+      m.addLayer({ id: TRACK, type: "line", source: TRACK, paint: { "line-color": "#8250df", "line-width": 2, "line-opacity": 0.8 } });
       m.addSource(ROUTE, { type: "geojson", data: routeLine(routeRef.current) });
       m.addLayer({ id: ROUTE, type: "line", source: ROUTE, paint: { "line-color": "#d97706", "line-width": 3, "line-dasharray": [2, 1] } });
     });
@@ -136,6 +144,30 @@ export function DroneMap({ drones, selected, onSelect, onArea, route, fence, pla
   useEffect(() => {
     map.current?.getCanvas().classList.toggle("planning", planning);
   }, [planning]);
+
+  useEffect(() => {
+    (map.current?.getSource(TRACK) as GeoJSONSource | undefined)?.setData(routeLine(replayTrack));
+  }, [replayTrack]);
+
+  // Where the replayed drone was: a ghost beside the live marker.
+  useEffect(() => {
+    const m = map.current;
+    if (!m) return;
+    if (!replayAt) {
+      ghost.current?.remove();
+      ghost.current = null;
+      return;
+    }
+    if (!ghost.current) {
+      const el = document.createElement("div");
+      el.className = "replay-ghost";
+      ghost.current = new Marker({ element: el }).setLngLat([replayAt.lon, replayAt.lat]).addTo(m);
+    }
+    ghost.current.setLngLat([replayAt.lon, replayAt.lat]);
+    const el = ghost.current.getElement();
+    el.dataset.lat = String(replayAt.lat);
+    el.dataset.lon = String(replayAt.lon);
+  }, [replayAt]);
 
   // Centre on a drone picked in the list.
   useEffect(() => {

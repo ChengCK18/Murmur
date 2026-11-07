@@ -1,4 +1,4 @@
-import { type FormEvent, useState } from "react";
+import { type FormEvent, type ReactNode, useState } from "react";
 import { isFinal, STATUS_LABELS, TYPE_LABELS } from "./commands";
 import { altitudeLabel, batteryLabel } from "./drones";
 import type { CommandParams, CommandType, CommandUpdate, DroneState, Mission, Waypoint } from "./types";
@@ -18,6 +18,7 @@ interface Props {
   onPlanning(on: boolean): void;
   onClearPlan(): void;
   onUpload(altitudeM: number): void;
+  replay: ReactNode; // shown with or without a login
 }
 
 // A command that waits for a second click: arm and takeoff (plan §4).
@@ -28,7 +29,7 @@ interface Pending {
 }
 
 // CommandPanel sends commands to the selected drone and shows how each ended.
-export function CommandPanel({ drone, user, log, onSend, onLogin, onLogout, ...mission }: Props) {
+export function CommandPanel({ drone, user, log, onSend, onLogin, onLogout, replay, ...mission }: Props) {
   return (
     <section className="panel" aria-label={`Drone ${drone.drone_id}`}>
       <h2>Drone {drone.drone_id}</h2>
@@ -51,6 +52,7 @@ export function CommandPanel({ drone, user, log, onSend, onLogin, onLogout, ...m
       ) : (
         <Login onLogin={onLogin} />
       )}
+      {replay}
     </section>
   );
 }

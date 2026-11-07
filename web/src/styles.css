@@ -97,3 +97,6 @@ html, body, #root { margin: 0; height: 100%; font: 14px/1.4 system-ui, sans-seri
 .drone.alert .arrow { stroke: #cf222e; stroke-width: 3; }
 .fleet .fence { margin-top: 8px; }
 .fleet .hint { color: #57606a; font-size: 12px; margin: 6px 0 0; }
+
+.panel .scrubber { width: 100%; margin: 4px 0; }
+.replay-ghost { width: 14px; height: 14px; border-radius: 50%; background: #8250df; border: 2px solid #fff; box-shadow: 0 1px 4px rgb(0 0 0 / 0.4); }
