@@ -8,6 +8,7 @@ export interface Handlers {
   remove(id: number): void;
   status(status: Status): void;
   commandStatus?(update: CommandUpdate, requestId?: string): void;
+  fleetStarted?(started: { fleet_id?: string; count: number; error?: string; request_id?: string }): void;
   error?(message: string): void;
 }
 
@@ -88,6 +89,14 @@ export class Connection {
     return true;
   }
 
+  // fleetCommand sends one command to several drones; false if the socket is
+  // not open to take it.
+  fleetCommand(requestId: string, droneIds: number[], type: CommandType, params: CommandParams = {}): boolean {
+    if (this.socket?.readyState !== OPEN) return false;
+    this.socket.send(JSON.stringify({ type: "fleet_command", request_id: requestId, drones: droneIds, command: type, params }));
+    return true;
+  }
+
   // reconnect opens a fresh socket at once. The gateway reads the login when a
   // socket opens, so the page calls this after logging in or out.
   reconnect(): void {
@@ -137,6 +146,9 @@ export class Connection {
         break;
       case "command_status":
         this.handlers.commandStatus?.(msg.update, msg.request_id);
+        break;
+      case "fleet_started":
+        this.handlers.fleetStarted?.(msg);
         break;
       case "error":
         this.handlers.error?.(msg.message);

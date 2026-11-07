@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import type { DroneState } from "./types";
 import { altitudeLabel, batteryLabel } from "./drones";
 
@@ -5,12 +6,14 @@ interface Props {
   drones: DroneState[];
   selected: number | null;
   onSelect(id: number): void;
+  children?: ReactNode;
 }
 
-export function DroneList({ drones, selected, onSelect }: Props) {
+export function DroneList({ drones, selected, onSelect, children }: Props) {
   return (
     <aside className="list">
       <h1>Drones ({drones.length})</h1>
+      {children}
       {drones.length === 0 && <p className="empty">No drones yet.</p>}
       <ul>
         {drones.map((d) => (

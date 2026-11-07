@@ -178,4 +178,12 @@ describe("Connection", () => {
     vi.advanceTimersByTime(60_000);
     expect(sockets).toHaveLength(2);
   });
+
+  it("sends a fleet command only on an open socket", () => {
+    expect(conn.fleetCommand("r1", [1, 2], "land")).toBe(false);
+    conn.start();
+    sockets[0].accept();
+    expect(conn.fleetCommand("r2", [1, 2], "land")).toBe(true);
+    expect(sockets[0].sent.at(-1)).toEqual({ type: "fleet_command", request_id: "r2", drones: [1, 2], command: "land", params: {} });
+  });
 });

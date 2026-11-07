@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { CommandPanel } from "./CommandPanel";
-import { Commands } from "./commands";
+import { Commands, type FleetView } from "./commands";
 import { Connection, type Status, wsURL } from "./connection";
 import { Drones } from "./drones";
 import { DroneList } from "./DroneList";
 import { DroneMap } from "./DroneMap";
+import { FleetBar } from "./FleetBar";
 import type { BBox, CommandParams, CommandType, CommandUpdate, DroneState } from "./types";
 
 const LIST_EVERY = 10_000; // ms between refreshes of the whole fleet's list
@@ -23,9 +24,31 @@ export function App() {
   const selectedRef = useRef<number | null>(null);
   selectedRef.current = selected;
 
+  const [fleet, setFleet] = useState<FleetView | null>(null);
+  // The latest fleet command: what the summary is counted from.
+  const latestFleet = useRef<{ type: string; count: number; requestId: string; fleetId?: string; error?: string } | null>(null);
+
   const showLog = useCallback(() => {
     setLog(selectedRef.current === null ? [] : commands.current.forDrone(selectedRef.current));
+    const f = latestFleet.current;
+    setFleet(f ? commands.current.fleet(f.type, f.count, f.fleetId, f.error) : null);
   }, []);
+
+  // A fleet's statuses, reloaded after a reconnect: any sent meanwhile went by
+  // unseen, and the summary must not wait for them for ever.
+  const reloadFleet = useCallback(async () => {
+    const id = latestFleet.current?.fleetId;
+    if (!id) return;
+    try {
+      const res = await fetch(`/api/fleets/${id}/commands`);
+      if (!res.ok) return;
+      const body = (await res.json()) as { commands: CommandUpdate[] };
+      commands.current.load(body.commands);
+      showLog();
+    } catch {
+      // The gateway is down; the next reconnect tries again.
+    }
+  }, [showLog]);
 
   // A drone's commands from the command service: on selecting it, and after a
   // reconnect, when statuses may have gone by unseen.
@@ -62,7 +85,18 @@ export function App() {
           commands.current.connectionLost();
           showLog();
         }
-        if (st === "open" && selectedRef.current !== null) void reloadLog(selectedRef.current);
+        if (st === "open") {
+          if (selectedRef.current !== null) void reloadLog(selectedRef.current);
+          void reloadFleet();
+        }
+      },
+      fleetStarted: (started) => {
+        const f = latestFleet.current;
+        if (!f || f.requestId !== started.request_id) return;
+        f.fleetId = started.fleet_id;
+        f.error = started.error;
+        if (started.count) f.count = started.count;
+        showLog();
       },
       commandStatus: (u, requestId) => {
         commands.current.apply(u, requestId);
@@ -110,7 +144,7 @@ export function App() {
       c.stop();
       conn.current = null;
     };
-  }, [reloadLog, showLog]);
+  }, [reloadLog, reloadFleet, showLog]);
 
   useEffect(() => {
     void (async () => {
@@ -153,6 +187,19 @@ export function App() {
     [user, showLog],
   );
 
+  const sendFleet = useCallback(
+    (type: CommandType) => {
+      const ids = store.current.list().flatMap((d) => (d.link === "ok" ? [d.drone_id] : []));
+      const requestId = `fleet-${Date.now()}`;
+      latestFleet.current = { type, count: ids.length, requestId };
+      if (!conn.current?.fleetCommand(requestId, ids, type)) {
+        latestFleet.current.error = "Not connected to the gateway";
+      }
+      showLog();
+    },
+    [showLog],
+  );
+
   const login = useCallback(async (username: string, password: string): Promise<string> => {
     try {
       const res = await fetch("/api/login", {
@@ -178,6 +225,7 @@ export function App() {
     }
     setUser("");
     commands.current.clear();
+    latestFleet.current = null;
     showLog();
     conn.current?.reconnect();
   }, [showLog]);
@@ -191,7 +239,9 @@ export function App() {
           {status === "connecting" ? "Connecting…" : "Connection lost, reconnecting…"}
         </div>
       )}
-      <DroneList drones={drones} selected={selected} onSelect={select} />
+      <DroneList drones={drones} selected={selected} onSelect={select}>
+        {user && <FleetBar live={drones.filter((d) => d.link === "ok").length} view={fleet} onSend={sendFleet} />}
+      </DroneList>
       <div className="stage">
         <DroneMap drones={drones} selected={selected} onSelect={select} onArea={followArea} />
         {drone && checked && (

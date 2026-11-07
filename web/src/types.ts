@@ -37,6 +37,7 @@ export type CommandStatus =
 
 export interface CommandUpdate {
   command_id?: string; // missing if it was refused before it got one
+  fleet_id?: string;
   drone_id: number;
   type: string;
   status: CommandStatus;
@@ -63,4 +64,5 @@ export type ServerMessage =
   | { type: "update"; drone_id: number; state: DroneState }
   | { type: "remove"; drone_id: number } // silent for the gateway's -stale (10 min)
   | { type: "command_status"; request_id?: string; update: CommandUpdate }
+  | { type: "fleet_started"; request_id?: string; fleet_id?: string; count: number; error?: string }
   | { type: "error"; message: string };

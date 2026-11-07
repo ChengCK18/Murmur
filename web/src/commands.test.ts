@@ -86,4 +86,30 @@ describe("Commands", () => {
     c.clear();
     expect(c.forDrone(1)).toEqual([]);
   });
+
+  it("sums up a fleet command drone by drone", () => {
+    const c = new Commands();
+    const f = { fleet_id: "f1" };
+    c.apply(status("accepted", "a", { ...f, drone_id: 1 }));
+    c.apply(status("rejected", "b", { ...f, drone_id: 3, reason: "denied by the drone" }));
+    c.apply(status("timed_out", "d", { ...f, drone_id: 2 }));
+    c.apply(status("sent", "e", { ...f, drone_id: 4 }));
+    c.apply(status("accepted", "other", { fleet_id: "f2", drone_id: 5 }));
+    const v = c.fleet("land", 5, "f1");
+    expect(v.totals).toEqual({ accepted: 1, rejected: 1, timed_out: 1 });
+    expect(v.waiting).toBe(2);
+    expect(v.failures.map((u) => u.drone_id)).toEqual([2, 3]);
+  });
+
+  it("counts a fleet's drone refused before it had an ID", () => {
+    const c = new Commands();
+    c.apply({ fleet_id: "f1", drone_id: 1, type: "land", status: "rejected", attempts: 0, issued_by: "demo", at: "" });
+    expect(c.fleet("land", 1, "f1").waiting).toBe(0);
+  });
+
+  it("shows a fleet command refused whole as finished", () => {
+    const v = new Commands().fleet("land", 3, undefined, "log in to send commands");
+    expect(v.waiting).toBe(0);
+    expect(v.error).toBe("log in to send commands");
+  });
 });

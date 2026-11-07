@@ -33,14 +33,14 @@ test.afterEach(async ({ page }) => {
 
 test("sending commands takes a login", async ({ page }) => {
   await selectADrone(page);
-  await expect(page.getByRole("button", { name: "Land" })).toBeHidden();
+  await expect(page.getByRole("button", { name: "Land", exact: true })).toBeHidden();
   await logIn(page, "wrong");
   await expect(page.getByText("wrong username or password")).toBeVisible();
-  await expect(page.getByRole("button", { name: "Land" })).toBeHidden();
+  await expect(page.getByRole("button", { name: "Land", exact: true })).toBeHidden();
 
   await logIn(page);
   await expect(page.getByText("Logged in as demo")).toBeVisible();
-  await expect(page.getByRole("button", { name: "Land" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Land", exact: true })).toBeVisible();
 
   await page.reload(); // the session is a cookie, so it outlives the page
   await expect(page.locator(LIVE)).toHaveCount(DRONES, { timeout: 20_000 });
@@ -48,7 +48,7 @@ test("sending commands takes a login", async ({ page }) => {
   await expect(page.getByText("Logged in as demo")).toBeVisible();
 
   await page.getByRole("button", { name: "Log out" }).click();
-  await expect(page.getByRole("button", { name: "Land" })).toBeHidden();
+  await expect(page.getByRole("button", { name: "Land", exact: true })).toBeHidden();
 });
 
 test("a command runs on the drone and every step shows", async ({ page }) => {
@@ -64,7 +64,7 @@ test("a command runs on the drone and every step shows", async ({ page }) => {
   await expect(newest(page)).toHaveAttribute("data-status", "rejected");
   await expect(newest(page)).toContainText("Takeoff needs the drone armed and in GUIDED mode");
 
-  await page.getByRole("button", { name: "Land" }).click();
+  await page.getByRole("button", { name: "Land", exact: true }).click();
   await expect(newest(page)).toHaveAttribute("data-status", "accepted");
   await expect(state).toContainText("LAND");
 
@@ -109,4 +109,17 @@ test("the command list survives a gateway restart", async ({ page }) => {
   await expect(newest(page)).toContainText("Return to launch");
   await expect(newest(page)).toHaveAttribute("data-status", "accepted");
   await expect(page.getByText("Logged in as demo")).toBeVisible();
+});
+
+test("a fleet command ends with a result for every drone", async ({ page }) => {
+  await selectADrone(page);
+  await logIn(page);
+  await page.getByRole("button", { name: "Return all to launch" }).click();
+  await expect(page.getByRole("alertdialog", { name: "Confirm fleet command" })).toContainText(`all ${DRONES} live drones`);
+  await page.getByRole("button", { name: "Confirm" }).click();
+
+  const summary = page.getByTestId("fleet-summary");
+  await expect(summary).toHaveAttribute("data-waiting", "0", { timeout: 5_000 });
+  await expect(summary).toHaveText(`Return to launch: ${DRONES} accepted`);
+  await expect(page.locator(".list li", { hasText: "RTL" })).toHaveCount(DRONES, { timeout: 15_000 });
 });
