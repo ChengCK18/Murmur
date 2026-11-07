@@ -41,6 +41,7 @@ const (
 	returning
 	landing
 	grounded
+	onMission
 )
 
 // pilot flies one drone: its route until a command says otherwise (guide step
@@ -55,6 +56,18 @@ type pilot struct {
 	last   state
 	target float64       // climb to this height
 	clock  time.Duration // the elapsed time of the last at
+
+	items    []missionItem // the mission held, once complete
+	incoming []missionItem // the upload in progress
+	want     int           // items expected in it
+	item     int           // the item being flown
+}
+
+// missionItem is one item of a mission.
+type missionItem struct {
+	cmd      common.MAV_CMD
+	lat, lng float64
+	alt      float64
 }
 
 func newPilot(p path) *pilot {
@@ -82,7 +95,12 @@ func (pl *pilot) at(elapsed time.Duration) state {
 			pl.phase = holding
 		}
 	case returning:
-		s = pl.goHome(s, dt)
+		var there bool
+		if s, there = goTo(s, pl.path.lat, pl.path.lng, dt); there {
+			pl.phase = landing
+		}
+	case onMission:
+		s = pl.flyMission(s, dt)
 	case landing:
 		s.alt -= descentRate * dt
 		if s.alt <= 0 {
@@ -96,22 +114,49 @@ func (pl *pilot) at(elapsed time.Duration) state {
 	return s
 }
 
-// goHome flies s towards the centre of the drone's cell, and lands there.
-func (pl *pilot) goHome(s state, dt float64) state {
+// goTo flies s towards a point and reports whether it got there.
+func goTo(s state, lat, lng, dt float64) (state, bool) {
 	lngScale := metresPerDegLat * math.Cos(s.lat*math.Pi/180)
-	north := (pl.path.lat - s.lat) * metresPerDegLat
-	east := (pl.path.lng - s.lng) * lngScale
+	north := (lat - s.lat) * metresPerDegLat
+	east := (lng - s.lng) * lngScale
 	left := math.Hypot(north, east)
 	step := returnSpeed * dt
 	if left <= step {
-		s.lat, s.lng = pl.path.lat, pl.path.lng
-		pl.phase = landing
-		return s
+		s.lat, s.lng = lat, lng
+		return s, true
 	}
 	s.vn, s.ve, s.speed = returnSpeed*north/left, returnSpeed*east/left, returnSpeed
 	s.lat += step * north / left / metresPerDegLat
 	s.lng += step * east / left / lngScale
 	s.headingDeg = math.Mod(math.Atan2(east, north)*180/math.Pi+360, 360)
+	return s, false
+}
+
+// flyMission works through the mission's items, as AUTO does.
+func (pl *pilot) flyMission(s state, dt float64) state {
+	if pl.item >= len(pl.items) {
+		pl.phase = holding
+		return s
+	}
+	it := pl.items[pl.item]
+	switch it.cmd {
+	case common.MAV_CMD_NAV_TAKEOFF:
+		if s.alt < it.alt {
+			s.alt = math.Min(s.alt+climbRate*dt, it.alt)
+			return s
+		}
+	case common.MAV_CMD_NAV_WAYPOINT:
+		var there bool
+		if s, there = goTo(s, it.lat, it.lng, dt); !there {
+			return s
+		}
+		s.alt = it.alt
+	case common.MAV_CMD_NAV_RETURN_TO_LAUNCH:
+		pl.mode = modeRTL
+		pl.phase = returning
+		return s
+	}
+	pl.item++
 	return s
 }
 
@@ -154,17 +199,56 @@ func (pl *pilot) command(m *ardupilotmega.MessageCommandLong) ardupilotmega.MAV_
 
 	case common.MAV_CMD_NAV_LAND:
 		return pl.setMode(modeLand)
+
+	case common.MAV_CMD_MISSION_START:
+		if !pl.armed || len(pl.items) == 0 {
+			return ardupilotmega.MAV_RESULT_FAILED
+		}
+		pl.startMission()
+		return ardupilotmega.MAV_RESULT_ACCEPTED
 	}
 	return ardupilotmega.MAV_RESULT_UNSUPPORTED
+}
+
+func (pl *pilot) startMission() {
+	pl.mode, pl.phase = modeAuto, onMission
+	pl.item = 1 // item 0 is home
+}
+
+// missionCount starts an upload and returns the item to ask for.
+func (pl *pilot) missionCount(n int) int {
+	pl.mu.Lock()
+	defer pl.mu.Unlock()
+	pl.want, pl.incoming = n, nil
+	return 0
+}
+
+// missionItem takes an item. It returns the next one to ask for, or done once
+// it holds them all. An item out of turn gets the one it needs asked for again.
+func (pl *pilot) missionItem(m *ardupilotmega.MessageMissionItemInt) (next int, done bool) {
+	pl.mu.Lock()
+	defer pl.mu.Unlock()
+	if int(m.Seq) == len(pl.incoming) && len(pl.incoming) < pl.want {
+		pl.incoming = append(pl.incoming, missionItem{cmd: m.Command, lat: float64(m.X) / 1e7, lng: float64(m.Y) / 1e7, alt: float64(m.Z)})
+	}
+	if len(pl.incoming) == pl.want { // also a resent last item: its ack was lost
+		pl.items = pl.incoming
+		return 0, true
+	}
+	return len(pl.incoming), false
 }
 
 func (pl *pilot) setMode(mode uint32) ardupilotmega.MAV_RESULT {
 	switch mode {
 	case modeGuided:
-		if pl.phase == onRoute || pl.phase == returning || pl.phase == landing {
+		if pl.phase == onRoute || pl.phase == returning || pl.phase == landing || pl.phase == onMission {
 			pl.phase = holding // stops where it is, as GUIDED does with no target
 		}
 	case modeAuto:
+		if len(pl.items) > 0 && pl.armed {
+			pl.startMission()
+			return ardupilotmega.MAV_RESULT_ACCEPTED
+		}
 		if pl.phase != onRoute {
 			return ardupilotmega.MAV_RESULT_FAILED // ArduPilot refuses AUTO with no mission
 		}
@@ -210,17 +294,44 @@ func respond(conn *net.UDPConn, dec *mavlink.Decoder, r *radio, pl *pilot, sysID
 		}
 		frames, _ := dec.Decode(time.Now(), src, buf[:n])
 		for _, f := range frames {
-			m, ok := f.Msg.(*ardupilotmega.MessageCommandLong)
-			if !ok || m.TargetSystem != sysID || rand.Float64() < drop {
+			if rand.Float64() < drop {
 				continue
 			}
-			result := ardupilotmega.MAV_RESULT_TEMPORARILY_REJECTED
-			if rand.Float64() >= reject {
-				result = pl.command(m)
+			var answer message.Message
+			switch m := f.Msg.(type) {
+			case *ardupilotmega.MessageCommandLong:
+				if m.TargetSystem != sysID {
+					continue
+				}
+				result := ardupilotmega.MAV_RESULT_TEMPORARILY_REJECTED
+				if rand.Float64() >= reject {
+					result = pl.command(m)
+				}
+				answer = &ardupilotmega.MessageCommandAck{Command: m.Command, Result: result, TargetSystem: f.SysID, TargetComponent: f.CompID}
+			case *ardupilotmega.MessageMissionCount:
+				if m.TargetSystem != sysID {
+					continue
+				}
+				if rand.Float64() < reject {
+					answer = &ardupilotmega.MessageMissionAck{TargetSystem: f.SysID, TargetComponent: f.CompID, Type: ardupilotmega.MAV_MISSION_DENIED}
+					break
+				}
+				answer = &ardupilotmega.MessageMissionRequestInt{TargetSystem: f.SysID, TargetComponent: f.CompID, Seq: uint16(pl.missionCount(int(m.Count)))}
+			case *ardupilotmega.MessageMissionItemInt:
+				if m.TargetSystem != sysID {
+					continue
+				}
+				next, done := pl.missionItem(m)
+				if done {
+					answer = &ardupilotmega.MessageMissionAck{TargetSystem: f.SysID, TargetComponent: f.CompID, Type: ardupilotmega.MAV_MISSION_ACCEPTED}
+				} else {
+					answer = &ardupilotmega.MessageMissionRequestInt{TargetSystem: f.SysID, TargetComponent: f.CompID, Seq: uint16(next)}
+				}
+			default:
+				continue
 			}
-			ack := &ardupilotmega.MessageCommandAck{Command: m.Command, Result: result, TargetSystem: f.SysID, TargetComponent: f.CompID}
-			if err := r.send(ack); err != nil {
-				log.Printf("drone %d: ack: %v", sysID, err)
+			if err := r.send(answer); err != nil {
+				log.Printf("drone %d: answer: %v", sysID, err)
 			}
 		}
 	}

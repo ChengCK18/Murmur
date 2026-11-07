@@ -508,3 +508,53 @@ func TestRejectsAndDropsOnRequest(t *testing.T) {
 		t.Errorf("reject: acked %v, result %v", acked, r)
 	}
 }
+
+func TestPilotFliesAMission(t *testing.T) {
+	pl := newPilot(newPath(0, 1))
+	pl.at(time.Second)
+	if r := pl.command(long(common.MAV_CMD_MISSION_START, 0, 0, 0)); r != ardupilotmega.MAV_RESULT_FAILED {
+		t.Errorf("start with no mission: %v", r)
+	}
+
+	north := pl.path.lat + 0.0005
+	items := []*ardupilotmega.MessageMissionItemInt{
+		{Seq: 0, Command: common.MAV_CMD_NAV_WAYPOINT},
+		{Seq: 1, Command: common.MAV_CMD_NAV_TAKEOFF, Z: 30},
+		{Seq: 2, Command: common.MAV_CMD_NAV_WAYPOINT, X: int32(north * 1e7), Y: int32(pl.path.lng * 1e7), Z: 30},
+		{Seq: 3, Command: common.MAV_CMD_NAV_RETURN_TO_LAUNCH},
+	}
+	if pl.missionCount(4) != 0 {
+		t.Fatal("the upload should ask for item 0 first")
+	}
+	if next, done := pl.missionItem(items[2]); next != 0 || done {
+		t.Errorf("out of turn: asks for %d, done %v", next, done)
+	}
+	for i, it := range items {
+		pl.missionItem(it) // a repeat changes nothing
+		next, done := pl.missionItem(it)
+		if want := i == len(items)-1; done != want || (!want && next != i+1) {
+			t.Errorf("item %d: next %d, done %v", i, next, done)
+		}
+	}
+	if _, done := pl.missionItem(items[3]); !done {
+		t.Error("a resent last item should be acknowledged again")
+	}
+
+	if r := pl.command(long(common.MAV_CMD_MISSION_START, 0, 0, 0)); r != ardupilotmega.MAV_RESULT_ACCEPTED {
+		t.Fatalf("start: %v", r)
+	}
+	seen := false
+	var s state
+	for i := 2; i < 300; i++ {
+		s = pl.at(time.Duration(i) * time.Second)
+		if s.alt == 30 && math.Abs(s.lat-float64(int32(north*1e7))/1e7) < 1e-6 {
+			seen = true
+		}
+	}
+	if !seen {
+		t.Error("never reached the waypoint at mission height")
+	}
+	if s.alt != 0 || s.armed || s.mode != modeRTL {
+		t.Errorf("should end landed at home: %+v", s)
+	}
+}
