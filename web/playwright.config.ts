@@ -8,10 +8,20 @@ export default defineConfig({
   workers: 1, // the tests restart and stop shared services
   use: {
     baseURL: process.env.MURMUR_URL ?? "http://localhost:8080",
-    channel: "chrome", // the installed Google Chrome; no browser download
-    launchOptions: {
-      // MapLibre needs WebGL, which headless Chrome has only with SwiftShader.
-      args: ["--enable-unsafe-swiftshader", "--use-angle=swiftshader"],
-    },
   },
+  // Latest Chrome and Firefox (plan open item 8).
+  projects: [
+    {
+      name: "chrome",
+      use: {
+        channel: "chrome", // the installed Google Chrome
+        launchOptions: {
+          // MapLibre needs WebGL, which headless Chrome has only with SwiftShader.
+          args: ["--enable-unsafe-swiftshader", "--use-angle=swiftshader"],
+        },
+      },
+    },
+    // Playwright's own Firefox build: npx playwright install firefox
+    { name: "firefox", use: { browserName: "firefox" } },
+  ],
 });
