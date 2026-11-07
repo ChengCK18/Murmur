@@ -162,6 +162,9 @@ type state struct {
 	speed      float64 // m/s
 	yawRate    float64 // rad/s, positive clockwise
 	bank       float64 // rad, for the turn
+	alt        float64 // m above home
+	armed      bool
+	mode       uint32 // ArduPilot Copter mode number
 }
 
 func (p path) at(elapsed time.Duration) state {
@@ -176,6 +179,9 @@ func (p path) at(elapsed time.Duration) state {
 		speed:      speed,
 		yawRate:    l.yawRate,
 		bank:       math.Atan(speed * l.yawRate / gravity), // a coordinated turn
+		alt:        p.alt,
+		armed:      true,
+		mode:       modeAuto, // following its route
 	}
 }
 
@@ -193,9 +199,13 @@ func battery(elapsed time.Duration) (pct int8, mV uint16, consumedMAh int32) {
 // (SITL: 5 Hz; the map draws heading from the position). Tick 0 starts with
 // the HEARTBEAT, so the ingester registers the drone before its first data.
 func (p path) messages(n int) []message.Message {
+	return frames(n, p.at(time.Duration(n)*tick))
+}
+
+// frames is what a drone in state s sends on tick n.
+func frames(n int, s state) []message.Message {
 	elapsed := time.Duration(n) * tick
 	boot := uint32(elapsed.Milliseconds())
-	s := p.at(elapsed)
 	pct, mV, mAh := battery(elapsed)
 
 	var out []message.Message
@@ -203,9 +213,9 @@ func (p path) messages(n int) []message.Message {
 		out = append(out, &ardupilotmega.MessageHeartbeat{
 			Type:           ardupilotmega.MAV_TYPE_QUADROTOR,
 			Autopilot:      ardupilotmega.MAV_AUTOPILOT_ARDUPILOTMEGA,
-			BaseMode:       217, // armed, guided, stabilise, custom mode: as SITL in flight
-			CustomMode:     4,   // GUIDED
-			SystemStatus:   ardupilotmega.MAV_STATE_ACTIVE,
+			BaseMode:       baseMode(s.armed),
+			CustomMode:     s.mode,
+			SystemStatus:   systemStatus(s.armed),
 			MavlinkVersion: 3,
 		})
 	}
@@ -214,8 +224,8 @@ func (p path) messages(n int) []message.Message {
 			TimeBootMs:  boot,
 			Lat:         int32(math.Round(s.lat * 1e7)),
 			Lon:         int32(math.Round(s.lng * 1e7)),
-			Alt:         int32((homeAltMSL + p.alt) * 1000),
-			RelativeAlt: int32(p.alt * 1000),
+			Alt:         int32((homeAltMSL + s.alt) * 1000),
+			RelativeAlt: int32(s.alt * 1000),
 			Vx:          int16(math.Round(s.vn * 100)),
 			Vy:          int16(math.Round(s.ve * 100)),
 			Hdg:         uint16(math.Round(s.headingDeg*100)) % 36000,
@@ -254,4 +264,22 @@ func (p path) messages(n int) []message.Message {
 			})
 	}
 	return out
+}
+
+// baseMode is HEARTBEAT.base_mode as SITL sends it: guided, stabilise and
+// custom mode, plus the armed flag.
+func baseMode(armed bool) ardupilotmega.MAV_MODE_FLAG {
+	m := ardupilotmega.MAV_MODE_FLAG_GUIDED_ENABLED | ardupilotmega.MAV_MODE_FLAG_STABILIZE_ENABLED |
+		ardupilotmega.MAV_MODE_FLAG_MANUAL_INPUT_ENABLED | ardupilotmega.MAV_MODE_FLAG_CUSTOM_MODE_ENABLED
+	if armed {
+		m |= ardupilotmega.MAV_MODE_FLAG_SAFETY_ARMED
+	}
+	return m
+}
+
+func systemStatus(armed bool) ardupilotmega.MAV_STATE {
+	if armed {
+		return ardupilotmega.MAV_STATE_ACTIVE
+	}
+	return ardupilotmega.MAV_STATE_STANDBY
 }

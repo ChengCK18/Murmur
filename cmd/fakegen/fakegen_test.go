@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"math"
 	"net"
@@ -9,7 +10,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/bluenviron/gomavlib/v3/pkg/dialect"
 	"github.com/bluenviron/gomavlib/v3/pkg/dialects/ardupilotmega"
+	"github.com/bluenviron/gomavlib/v3/pkg/dialects/common"
+	"github.com/bluenviron/gomavlib/v3/pkg/frame"
 
 	"github.com/ChengCK18/murmur/internal/mavlink"
 	"github.com/ChengCK18/murmur/internal/schema"
@@ -326,5 +330,181 @@ func TestFollowsTheTarget(t *testing.T) {
 	}
 	if before.Port() != after.Port() {
 		t.Errorf("source port changed from %d to %d", before.Port(), after.Port())
+	}
+}
+
+func long(cmd common.MAV_CMD, p1, p2, p7 float32) *ardupilotmega.MessageCommandLong {
+	return &ardupilotmega.MessageCommandLong{TargetSystem: 1, TargetComponent: 1, Command: cmd, Param1: p1, Param2: p2, Param7: p7}
+}
+
+func TestPilotLandsThenFliesAgain(t *testing.T) {
+	pl := newPilot(newPath(0, 1))
+	second := func(from, to int) state {
+		var s state
+		for i := from; i <= to; i++ {
+			s = pl.at(time.Duration(i) * time.Second)
+		}
+		return s
+	}
+	if s := second(0, 5); !s.armed || s.mode != modeAuto || s.alt == 0 {
+		t.Fatalf("starts as %+v", s)
+	}
+	refused := []struct {
+		name string
+		m    *ardupilotmega.MessageCommandLong
+	}{
+		{"disarm in the air", long(common.MAV_CMD_COMPONENT_ARM_DISARM, 0, 0, 0)},
+		{"takeoff outside GUIDED", long(common.MAV_CMD_NAV_TAKEOFF, 0, 0, 20)},
+		{"a mode outside the table", long(common.MAV_CMD_DO_SET_MODE, 1, 2, 0)},
+		{"a command it does not know", long(common.MAV_CMD_DO_SET_SERVO, 0, 0, 0)},
+	}
+	for _, c := range refused {
+		if r := pl.command(c.m); r == ardupilotmega.MAV_RESULT_ACCEPTED {
+			t.Errorf("%s: accepted", c.name)
+		}
+	}
+
+	if r := pl.command(long(common.MAV_CMD_NAV_LAND, 0, 0, 0)); r != ardupilotmega.MAV_RESULT_ACCEPTED {
+		t.Fatalf("land: %v", r)
+	}
+	start := pl.last
+	s := second(6, 60)
+	if s.alt != 0 || s.armed || s.mode != modeLand {
+		t.Fatalf("after landing: %+v", s)
+	}
+	if s.lat != start.lat || s.lng != start.lng {
+		t.Error("land moved sideways: it should descend where it is")
+	}
+
+	// Disarmed on the ground: the path back up is the one SITL needs.
+	if r := pl.command(long(common.MAV_CMD_NAV_TAKEOFF, 0, 0, 20)); r != ardupilotmega.MAV_RESULT_DENIED {
+		t.Errorf("takeoff while disarmed: %v", r)
+	}
+	for _, m := range []*ardupilotmega.MessageCommandLong{
+		long(common.MAV_CMD_COMPONENT_ARM_DISARM, 1, 0, 0),
+		long(common.MAV_CMD_DO_SET_MODE, 1, modeGuided, 0),
+		long(common.MAV_CMD_NAV_TAKEOFF, 0, 0, 20),
+		long(common.MAV_CMD_NAV_TAKEOFF, 0, 0, 20), // a resend
+	} {
+		if r := pl.command(m); r != ardupilotmega.MAV_RESULT_ACCEPTED {
+			t.Fatalf("%v: %v", m.Command, r)
+		}
+	}
+	s = second(61, 100)
+	if s.alt != 20 || !s.armed || s.mode != modeGuided {
+		t.Errorf("after takeoff: %+v", s)
+	}
+}
+
+func TestPilotReturnsHomeAndLands(t *testing.T) {
+	pl := newPilot(newPath(0, 1))
+	pl.at(20 * time.Second)
+	if r := pl.command(long(common.MAV_CMD_NAV_RETURN_TO_LAUNCH, 0, 0, 0)); r != ardupilotmega.MAV_RESULT_ACCEPTED {
+		t.Fatalf("rtl: %v", r)
+	}
+	var s state
+	for i := 21; i < 200; i++ {
+		s = pl.at(time.Duration(i) * time.Second)
+	}
+	if s.alt != 0 || s.armed || s.mode != modeRTL || s.lat != pl.path.lat || s.lng != pl.path.lng {
+		t.Errorf("after return: %+v, home %v %v", s, pl.path.lat, pl.path.lng)
+	}
+}
+
+func TestAnswersCommands(t *testing.T) {
+	ln := listen(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	go run(ctx, config{count: 1, target: ln.LocalAddr().String()}) //nolint:errcheck
+
+	d, err := mavlink.NewDecoder()
+	if err != nil {
+		t.Fatal(err)
+	}
+	buf := make([]byte, 2048)
+	ln.SetReadDeadline(time.Now().Add(5 * time.Second)) //nolint:errcheck
+	_, drone, err := ln.ReadFromUDPAddrPort(buf)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	rw, err := dialect.NewReadWriter(ardupilotmega.Dialect)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	w, err := frame.NewWriter(frame.WriterConf{Writer: &out, DialectRW: rw, OutVersion: frame.V2, OutSystemID: 255, OutComponentID: 190})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := w.WriteMessage(long(common.MAV_CMD_NAV_LAND, 0, 0, 0)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ln.WriteToUDPAddrPort(out.Bytes(), drone); err != nil {
+		t.Fatal(err)
+	}
+
+	for {
+		ln.SetReadDeadline(time.Now().Add(5 * time.Second)) //nolint:errcheck
+		n, src, err := ln.ReadFromUDPAddrPort(buf)
+		if err != nil {
+			t.Fatalf("no answer: %v", err)
+		}
+		frames, _ := d.Decode(time.Now(), src, buf[:n])
+		for _, f := range frames {
+			ack, ok := f.Msg.(*ardupilotmega.MessageCommandAck)
+			if !ok {
+				continue
+			}
+			if ack.Command != common.MAV_CMD_NAV_LAND || ack.Result != ardupilotmega.MAV_RESULT_ACCEPTED ||
+				ack.TargetSystem != 255 || ack.TargetComponent != 190 || src != drone {
+				t.Errorf("ack %+v from %v", ack, src)
+			}
+			return
+		}
+	}
+}
+
+func TestRejectsAndDropsOnRequest(t *testing.T) {
+	ask := func(t *testing.T, cfg config) (acked bool, r ardupilotmega.MAV_RESULT) {
+		t.Helper()
+		ln := listen(t)
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		cfg.count, cfg.target = 1, ln.LocalAddr().String()
+		go run(ctx, cfg) //nolint:errcheck
+		d, _ := mavlink.NewDecoder()
+		rw, _ := dialect.NewReadWriter(ardupilotmega.Dialect)
+		buf := make([]byte, 2048)
+		ln.SetReadDeadline(time.Now().Add(5 * time.Second)) //nolint:errcheck
+		_, drone, err := ln.ReadFromUDPAddrPort(buf)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var out bytes.Buffer
+		w, _ := frame.NewWriter(frame.WriterConf{Writer: &out, DialectRW: rw, OutVersion: frame.V2, OutSystemID: 255, OutComponentID: 190})
+		w.WriteMessage(long(common.MAV_CMD_NAV_LAND, 0, 0, 0)) //nolint:errcheck
+		ln.WriteToUDPAddrPort(out.Bytes(), drone)              //nolint:errcheck
+		until := time.Now().Add(700 * time.Millisecond)
+		for time.Now().Before(until) {
+			ln.SetReadDeadline(until) //nolint:errcheck
+			n, src, err := ln.ReadFromUDPAddrPort(buf)
+			if err != nil {
+				break
+			}
+			frames, _ := d.Decode(time.Now(), src, buf[:n])
+			for _, f := range frames {
+				if ack, ok := f.Msg.(*ardupilotmega.MessageCommandAck); ok {
+					return true, ack.Result
+				}
+			}
+		}
+		return false, 0
+	}
+	if acked, _ := ask(t, config{commandDrop: 1}); acked {
+		t.Error("a dropped command was answered")
+	}
+	if acked, r := ask(t, config{commandReject: 1}); !acked || r != ardupilotmega.MAV_RESULT_TEMPORARILY_REJECTED {
+		t.Errorf("reject: acked %v, result %v", acked, r)
 	}
 }

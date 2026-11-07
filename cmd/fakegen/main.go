@@ -21,6 +21,8 @@ import (
 	"github.com/bluenviron/gomavlib/v3/pkg/dialect"
 	"github.com/bluenviron/gomavlib/v3/pkg/dialects/ardupilotmega"
 	"github.com/bluenviron/gomavlib/v3/pkg/frame"
+
+	"github.com/ChengCK18/murmur/internal/mavlink"
 )
 
 func main() {
@@ -29,6 +31,8 @@ func main() {
 	duration := flag.Duration("duration", 0, "stop after this long; 0 for no limit")
 	messages := flag.Int64("messages", 0, "send exactly this many messages in total, then stop; 0 for no limit")
 	drop := flag.Float64("drop", 0, "share of messages to lose on purpose, from 0 to 1, after they take a sequence number")
+	commandDrop := flag.Float64("command-drop", 0, "share of commands a drone loses without answering, from 0 to 1")
+	commandReject := flag.Float64("command-reject", 0, "share of commands a drone rejects, from 0 to 1")
 	flag.Parse()
 	log.SetFlags(log.Ltime)
 
@@ -40,7 +44,8 @@ func main() {
 		defer cancel()
 	}
 	log.Printf("%d drones sending to %s", *count, *target)
-	res, err := run(ctx, config{count: *count, target: *target, messages: *messages, drop: *drop})
+	res, err := run(ctx, config{count: *count, target: *target, messages: *messages, drop: *drop,
+		commandDrop: *commandDrop, commandReject: *commandReject})
 	if err != nil {
 		log.Fatalf("fakegen: %v", err)
 	}
@@ -55,6 +60,8 @@ type config struct {
 	drop     float64
 	lookup   func() (*net.UDPAddr, error) // nil: resolve target
 	refresh  time.Duration                // between lookups; 0: lookupEvery
+
+	commandDrop, commandReject float64
 }
 
 // lookupEvery is how often the target is looked up again.
@@ -148,6 +155,10 @@ func run(ctx context.Context, cfg config) (result, error) {
 	b := &budget{limited: cfg.messages > 0}
 	b.left.Store(cfg.messages)
 
+	dec, err := mavlink.NewDecoder()
+	if err != nil {
+		return result{}, err
+	}
 	var sent, errs, dropped atomic.Int64
 	var wg sync.WaitGroup
 	for i := range cfg.count {
@@ -167,11 +178,14 @@ func run(ctx context.Context, cfg config) (result, error) {
 			return result{}, err
 		}
 		wg.Go(func() {
-			defer conn.Close()
+			defer conn.Close() // ends respond
+			r := &radio{w: w}
+			pl := newPilot(newPath(i, cfg.count))
+			go respond(conn, dec, r, pl, sysID(i), cfg.commandDrop, cfg.commandReject)
 			// Spread the drones over one tick, so they do not all send in the
 			// same millisecond.
 			offset := time.Duration(i) * tick / time.Duration(cfg.count)
-			fly(ctx, newPath(i, cfg.count), w, offset, b, &sent, &errs)
+			fly(ctx, pl, r, offset, b, &sent, &errs)
 		})
 	}
 	wg.Wait()
@@ -185,7 +199,7 @@ func sysID(i int) uint8 {
 	return uint8(1 + i%250)
 }
 
-func fly(ctx context.Context, p path, w *frame.Writer, offset time.Duration, b *budget, sent, errs *atomic.Int64) {
+func fly(ctx context.Context, pl *pilot, r *radio, offset time.Duration, b *budget, sent, errs *atomic.Int64) {
 	select {
 	case <-ctx.Done():
 		return
@@ -194,11 +208,11 @@ func fly(ctx context.Context, p path, w *frame.Writer, offset time.Duration, b *
 	t := time.NewTicker(tick)
 	defer t.Stop()
 	for n := 0; ; n++ {
-		for _, m := range p.messages(n) {
+		for _, m := range frames(n, pl.at(time.Duration(n)*tick)) {
 			if !b.take() {
 				return
 			}
-			if err := w.WriteMessage(m); err != nil {
+			if err := r.send(m); err != nil {
 				errs.Add(1)
 				continue
 			}
