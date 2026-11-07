@@ -127,8 +127,7 @@ test("a fleet command ends with a result for every drone", async ({ page }) => {
 test("a mission is planned on the map, uploaded and flown", async ({ page }) => {
   const id = await selectADrone(page);
   await logIn(page);
-  await expect(page.getByTestId("mission-state")).toHaveText("No mission uploaded");
-  await expect(page.getByRole("button", { name: "Start mission" })).toBeDisabled();
+  await expect(page.getByTestId("mission-state")).toBeVisible();
 
   // Three points on the map, away from the panel.
   await page.getByRole("button", { name: "Plan on map" }).click();
@@ -139,8 +138,9 @@ test("a mission is planned on the map, uploaded and flown", async ({ page }) => 
   await expect(page.locator(".waypoint")).toHaveCount(3);
   await expect(page.getByText("3 so far")).toBeVisible();
 
+  await page.getByLabel("Mission altitude in metres").fill("25"); // unlike any mission an earlier run left
   await page.getByRole("button", { name: "Upload" }).click();
-  await expect(page.getByTestId("mission-state")).toHaveText("3 waypoints at 20 m: uploaded", { timeout: 10_000 });
+  await expect(page.getByTestId("mission-state")).toHaveText("3 waypoints at 25 m: uploaded", { timeout: 10_000 });
   await expect(newest(page)).toContainText("Mission upload");
   await expect(newest(page)).toHaveAttribute("data-status", "accepted");
   await expect(page.locator(".waypoint")).toHaveCount(3); // still drawn, now as the drone's
