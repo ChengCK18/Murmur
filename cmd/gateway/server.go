@@ -46,6 +46,7 @@ func (s *server) routes() http.Handler {
 	mux.HandleFunc("GET /api/session", s.handleSession)
 	if s.commands {
 		mux.HandleFunc("GET /api/drones/{id}/commands", s.handleCommands)
+		mux.HandleFunc("GET /api/fleets/{id}/commands", s.handleFleet)
 	}
 	if s.web != "" {
 		mux.Handle("GET /", spa(s.web))
@@ -58,10 +59,12 @@ func (s *server) routes() http.Handler {
 //	browser → gateway  {"type":"subscribe","drones":[1,2,3]}  {"type":"unsubscribe","drones":[2]}
 //	                   {"type":"subscribe_area","bbox":[minLng,minLat,maxLng,maxLat]}  replaces the last area
 //	                   {"type":"command","request_id":"r1","drone_id":1,"command":"takeoff","params":{"altitude_m":20}}
+//	                   {"type":"fleet_command","request_id":"r2","drones":[1,2,3],"command":"return_to_launch"}
 //	gateway → browser  {"type":"snapshot","drones":[...]}      on each subscribe; for an area, drones newly in it
 //	                   {"type":"update","drone_id":1,"state":{...}}
 //	                   {"type":"remove","drone_id":1}            silent for -stale
 //	                   {"type":"command_status","request_id":"r1","update":{...}}
+//	                   {"type":"fleet_started","request_id":"r2","fleet_id":"...","count":3}  or "error":"..."
 //	                   {"type":"error","message":"..."}
 func (s *server) handleWS(w http.ResponseWriter, r *http.Request) {
 	conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{OriginPatterns: s.origins})
@@ -119,19 +122,31 @@ func (s *server) handleWS(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 			s.hub.subscribeArea(ctx, cl, b)
-		case "command":
+		case "command", "fleet_command":
+			fleet := req.Type == "fleet_command"
+			refuse := func(reason string) {
+				if fleet {
+					cl.fleet(req.RequestID, command.FleetStarted{Error: reason})
+				} else {
+					cl.status(req.RequestID, command.Update{DroneID: req.DroneID, Type: req.Command, Status: command.Rejected, Reason: reason, At: time.Now()})
+				}
+			}
 			if !s.commands {
-				cl.status(req.RequestID, command.Update{DroneID: req.DroneID, Type: req.Command, Status: command.Rejected, Reason: "commands are switched off", At: time.Now()})
+				refuse("commands are switched off")
 				continue
 			}
 			select {
 			case inFlight <- struct{}{}:
 				go func() {
 					defer func() { <-inFlight }()
-					s.command(ctx, cl, token, req)
+					if fleet {
+						s.fleetCommand(ctx, cl, token, req)
+					} else {
+						s.command(ctx, cl, token, req)
+					}
 				}()
 			default:
-				cl.status(req.RequestID, command.Update{DroneID: req.DroneID, Type: req.Command, Status: command.Rejected, Reason: "too many commands at once", At: time.Now()})
+				refuse("too many commands at once")
 			}
 		default:
 			cl.errorf("unknown request type %q", req.Type)

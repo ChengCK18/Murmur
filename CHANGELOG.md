@@ -29,6 +29,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `fakegen` drones answer commands and act them out, so commands work on the whole fleet: arm and disarm, mode changes, takeoff, return to launch and land. `-command-drop` and `-command-reject` make them lose or reject a share of commands. They now report AUTO while on their routes.
 - A command panel on the map for the selected drone: log in, arm, disarm, set mode, take off, return to launch and land, with a confirmation for arm and takeoff. Every command shows its status and reason, and the list comes back after a reconnect.
 - The commander takes one command for many drones (up to 1,000), spreads the sends over about 100 ms and tracks each drone on its own, with the `fleet_id` in the `commands` table.
+- `{"type":"fleet_command",...}` on the WebSocket, answered by `fleet_started`, and `GET /api/fleets/{id}/commands` to reload one.
 - SITL stream-rate parameters (`deploy/sitl/murmur-streams.parm`) so headless SITL sends position, attitude, system and battery status without a ground station.
 - `deploy/sitl/run-fleet.sh` to start several SITL drones sending straight to the ingester (by name or IP address), lined up south of `fakegen`'s grid so the two fleets can run together.
 - `docker compose --profile sitl up` (`make sitl`) adds 3 ArduCopter SITL drones to the stack. The first build compiles ArduPilot, about 5 minutes; plain `docker compose up` does not need it.

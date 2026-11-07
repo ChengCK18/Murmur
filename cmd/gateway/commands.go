@@ -41,6 +41,20 @@ func (c *client) status(requestID string, u command.Update) {
 	c.poke()
 }
 
+// fleetMsg is {"type":"fleet_started","request_id":"...","fleet_id":"...","count":20}.
+type fleetMsg struct {
+	Type      string `json:"type"`
+	RequestID string `json:"request_id,omitempty"`
+	command.FleetStarted
+}
+
+func (c *client) fleet(requestID string, f command.FleetStarted) {
+	c.mu.Lock()
+	c.queue = append(c.queue, encode(fleetMsg{Type: "fleet_started", RequestID: requestID, FleetStarted: f}))
+	c.mu.Unlock()
+	c.poke()
+}
+
 // commandStatus sends a status to the browsers that care: any logged in as the
 // user who issued it, and any watching the drone (plan §4).
 func (h *hub) commandStatus(u command.Update) {
@@ -128,19 +142,58 @@ func (s *server) command(ctx context.Context, cl *client, token string, req requ
 	cl.status(req.RequestID, u)
 }
 
+// fleetCommand forwards one command for several drones. Each drone's statuses
+// come back the usual way; the browser counts them against the total here.
+func (s *server) fleetCommand(ctx context.Context, cl *client, token string, req request) {
+	refuse := func(reason string) { cl.fleet(req.RequestID, command.FleetStarted{Error: reason}) }
+	user := s.sessions.userOf(ctx, token)
+	if user == "" {
+		refuse("log in to send commands")
+		return
+	}
+	data, err := json.Marshal(command.FleetRequest{DroneIDs: req.Drones, Type: req.Command, Params: req.Params, IssuedBy: user})
+	if err != nil {
+		refuse("could not send the command")
+		return
+	}
+	wait, cancel := context.WithTimeout(ctx, commanderWait)
+	defer cancel()
+	m, err := s.nc.RequestWithContext(wait, command.FleetSubject, data)
+	if err != nil {
+		refuse("the command service is not answering")
+		return
+	}
+	var f command.FleetStarted
+	if err := json.Unmarshal(m.Data, &f); err != nil {
+		refuse("the command service gave a bad answer")
+		return
+	}
+	cl.fleet(req.RequestID, f)
+}
+
 // handleCommands serves GET /api/drones/{id}/commands: a drone's latest
 // commands, which a reconnected browser reloads from the command service.
 func (s *server) handleCommands(w http.ResponseWriter, r *http.Request) {
-	if s.sessions.userOf(r.Context(), cookieToken(r)) == "" {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "log in to see commands"})
-		return
-	}
 	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad drone ID"})
 		return
 	}
-	data, err := json.Marshal(command.RecentRequest{DroneID: id, Limit: recentCommands})
+	s.askRecent(w, r, command.RecentRequest{DroneID: id, Limit: recentCommands})
+}
+
+// handleFleet serves GET /api/fleets/{id}/commands: every drone's command of a
+// fleet command, for the same reason.
+func (s *server) handleFleet(w http.ResponseWriter, r *http.Request) {
+	s.askRecent(w, r, command.RecentRequest{FleetID: r.PathValue("id")})
+}
+
+func (s *server) askRecent(w http.ResponseWriter, r *http.Request, req command.RecentRequest) {
+	if s.sessions.userOf(r.Context(), cookieToken(r)) == "" {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "log in to see commands"})
+		return
+	}
+	data, err := json.Marshal(req)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not ask"})
 		return

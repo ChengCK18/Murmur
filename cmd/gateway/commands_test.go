@@ -293,3 +293,44 @@ func TestRecentCommands(t *testing.T) {
 		t.Errorf("%d %+v", res.StatusCode, body)
 	}
 }
+
+func TestFleetCommand(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	addr, nc := commandGateway(t, ctx, config{commands: true, user: "demo", password: "secret"})
+	var req command.FleetRequest
+	if _, err := nc.Subscribe(command.FleetSubject, func(m *nats.Msg) {
+		json.Unmarshal(m.Data, &req) //nolint:errcheck
+		data, _ := json.Marshal(command.FleetStarted{FleetID: "f1", Count: len(req.DroneIDs)})
+		m.Respond(data) //nolint:errcheck
+	}); err != nil {
+		t.Fatal(err)
+	}
+	nc.Flush() //nolint:errcheck
+
+	next := func(conn *websocket.Conn) fleetMsg {
+		wait, cancel := context.WithTimeout(ctx, 5*time.Second)
+		defer cancel()
+		var m fleetMsg
+		if err := wsjson.Read(wait, conn, &m); err != nil {
+			t.Fatal(err)
+		}
+		return m
+	}
+
+	anon := dial(t, ctx, addr, nil)
+	send(t, ctx, anon, request{Type: "fleet_command", RequestID: "r0", Drones: []int64{1}, Command: command.Land})
+	if m := next(anon); m.Type != "fleet_started" || m.Error != "log in to send commands" {
+		t.Errorf("without a login: %+v", m)
+	}
+
+	c, _ := login(t, addr, "demo", "secret")
+	conn := dial(t, ctx, addr, c)
+	send(t, ctx, conn, request{Type: "fleet_command", RequestID: "r1", Drones: []int64{1, 2, 3}, Command: command.ReturnHome})
+	if m := next(conn); m.RequestID != "r1" || m.FleetID != "f1" || m.Count != 3 {
+		t.Errorf("%+v", m)
+	}
+	if req.IssuedBy != "demo" || req.Type != command.ReturnHome || len(req.DroneIDs) != 3 {
+		t.Errorf("forwarded %+v", req)
+	}
+}

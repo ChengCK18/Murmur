@@ -344,7 +344,7 @@ type (
 
 // Messages from browsers.
 type request struct {
-	Type   string    `json:"type"` // "subscribe", "unsubscribe", "subscribe_area" or "command"
+	Type   string    `json:"type"` // "subscribe", "unsubscribe", "subscribe_area", "command" or "fleet_command"
 	Drones []int64   `json:"drones,omitempty"`
 	BBox   []float64 `json:"bbox,omitempty"` // minLng, minLat, maxLng, maxLat
 
