@@ -8,7 +8,7 @@ COMPOSE := docker compose -f deploy/docker-compose.yml
 test: ## unit tests; database and Redis tests skip if the infrastructure is not running
 	go test -count=1 ./...
 
-itest: infra ## the Phase 2 integration test (about 3 minutes)
+itest: infra ## the integration tests, with SITL if it is installed (about 4 minutes)
 	go test -tags integration -count=1 -v ./integration/
 
 web-test: ## the web app's type check and unit tests

@@ -103,6 +103,23 @@ services:
       <<: *metrics-health
       test: ["CMD", "wget", "-qO", "/dev/null", "http://localhost:9102/metrics"]
 
+  commander:
+    build: { <<: *build, args: { CMD: commander } }
+    image: murmur/commander:dev
+    command:
+      - -nats=nats://nats:4222
+      - -db=postgres://murmur:murmur@timescaledb:5432/murmur
+      - -metrics=:9104
+    ports:
+      - "127.0.0.1:9104:9104"
+    depends_on:
+      nats: { condition: service_healthy }
+      timescaledb: { condition: service_healthy }
+    restart: unless-stopped
+    healthcheck:
+      <<: *metrics-health
+      test: ["CMD", "wget", "-qO", "/dev/null", "http://localhost:9104/metrics"]
+
   fakegen:
     build: { <<: *build, args: { CMD: fakegen } }
     image: murmur/fakegen:dev
@@ -145,7 +162,7 @@ services:
       - prometheus-data:/prometheus
     ports:
       - "127.0.0.1:9090:9090"
-    depends_on: [ingester, consumer, gateway]
+    depends_on: [ingester, consumer, commander, gateway]
     restart: unless-stopped
 
 volumes:
