@@ -13,10 +13,10 @@ You need Docker with Compose v2. Nothing else: everything builds inside containe
 ```sh
 git clone https://github.com/ChengCK18/Murmur.git
 cd Murmur
-docker compose -f deploy/docker-compose.yml up -d --build --wait
+./start.sh
 ```
 
-The first build takes a few minutes. Then open:
+The first build takes a few minutes. The script waits until the drones are flying, then shows where everything is:
 
 | What | Where | Login |
 |---|---|---|
@@ -26,13 +26,15 @@ The first build takes a few minutes. Then open:
 
 Ten simulated drones fly circles, lines and survey patterns near ArduPilot's test field in Canberra. [docs/demo.md](docs/demo.md) is a two-minute tour.
 
-To stop everything: `docker compose -f deploy/docker-compose.yml down`. Add `-v` to delete the stored data too.
+| Command | Does |
+|---|---|
+| `./start.sh --open` | starts it and opens the map |
+| `./start.sh --sitl` | adds three real ArduCopter instances from [ArduPilot's simulator](https://ardupilot.org/dev/docs/sitl-simulator-software-in-the-loop.html); the first build compiles ArduPilot, about 5 minutes |
+| `./start.sh status` | what is running, and how many drones are live |
+| `./start.sh logs [service]` | follows the logs |
+| `./start.sh stop` | stops everything and keeps the data |
 
-With [ArduPilot's simulator](https://ardupilot.org/dev/docs/sitl-simulator-software-in-the-loop.html) added, three real ArduCopter instances fly beside the simulated drones. The first build compiles ArduPilot, about 5 minutes:
-
-```sh
-docker compose -f deploy/docker-compose.yml --profile sitl up -d --build --wait
-```
+The script is a wrapper around `docker compose -f deploy/docker-compose.yml`. To delete the stored data as well: `docker compose -f deploy/docker-compose.yml --profile sitl down -v`.
 
 ## Architecture
 

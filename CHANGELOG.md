@@ -39,6 +39,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Alerts on the map: a list of the alerts raised now above the drone list, drones with an alert outlined in red, and a geofence drawn and removed on the map.
 - Flight replay: `GET /api/drones/{id}/history?from=&to=` on the gateway (`-db`) reads a drone's stored flight, thinned to about 3,000 points, and the drone's panel plays it back with a time scrubber at 1, 10 or 60 times speed.
 - Grafana on `http://localhost:3000`, provisioned from `deploy/grafana/`: a *Murmur pipeline* dashboard (rates, loss, queue lag, write time, both latency spans, commands) and a *Murmur fleet* dashboard (messages stored, alerts and the command log from TimescaleDB). Viewing needs no login.
+- `./start.sh` builds and starts the stack, waits until the drones are flying and shows where everything is; `--sitl` adds the SITL drones, `--open` opens the map, and `status`, `logs` and `stop` do what they say.
 - SITL stream-rate parameters (`deploy/sitl/murmur-streams.parm`) so headless SITL sends position, attitude, system and battery status without a ground station.
 - `deploy/sitl/run-fleet.sh` to start several SITL drones sending straight to the ingester (by name or IP address), lined up south of `fakegen`'s grid so the two fleets can run together.
 - `docker compose --profile sitl up` (`make sitl`) adds 3 ArduCopter SITL drones to the stack. The first build compiles ArduPilot, about 5 minutes; plain `docker compose up` does not need it.

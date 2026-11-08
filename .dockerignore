@@ -10,3 +10,10 @@ web/node_modules/
 web/dist/
 web/test-results/
 web/playwright-report/
+# Not needed to build any image, and editing them should not cost a rebuild.
+/*.md
+/start.sh
+/Makefile
+docs/
+loadtest/
+integration/

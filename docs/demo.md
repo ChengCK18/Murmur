@@ -1,6 +1,6 @@
 # Two-minute demo
 
-What to show, in order, with what to say. Start with the stack running (`make up`), the map open at http://localhost:8080 and Grafana at http://localhost:3000 in a second tab.
+What to show, in order, with what to say. Start with the stack running (`./start.sh --open`), the map open at http://localhost:8080 and Grafana at http://localhost:3000 in a second tab.
 
 If the demo machine fails, fall back to the screen recording of this script.
 
@@ -19,6 +19,6 @@ If the demo machine fails, fall back to the screen recording of this script.
 
 ## If something goes wrong
 
-- **No drones on the map:** `docker compose -f deploy/docker-compose.yml ps`. Every service should be running; `make up` starts any that are not.
+- **No drones on the map:** `./start.sh status`. Every service should be running; `./start.sh` starts any that are not.
 - **Greyed-out drones beside the live ones:** drones from an earlier run, hidden after 10 minutes.
 - **A command times out:** the drone did not answer within 3 tries. It shows as timed out, never as pending.
