@@ -23,6 +23,7 @@ export function App() {
   const area = useRef<BBox | null>(null);
   const commands = useRef(new Commands());
   const [user, setUser] = useState("");
+  const [loginHint, setLoginHint] = useState(""); // a demo's credentials, from the gateway
   const [log, setLog] = useState<CommandUpdate[]>([]);
   const [checked, setChecked] = useState(false); // the login is known
   const selectedRef = useRef<number | null>(null);
@@ -202,7 +203,11 @@ export function App() {
     void (async () => {
       try {
         const res = await fetch("/api/session");
-        if (res.ok) setUser(((await res.json()) as { user: string }).user);
+        if (res.ok) {
+          const body = (await res.json()) as { user: string; hint?: string };
+          setUser(body.user);
+          setLoginHint(body.hint ?? "");
+        }
       } catch {
         // The gateway is down: not logged in, as far as this page can tell.
       }
@@ -399,6 +404,7 @@ export function App() {
             log={log}
             onSend={send}
             onLogin={login}
+            loginHint={loginHint}
             onLogout={logout}
             mission={mission}
             plan={plan}

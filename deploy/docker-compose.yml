@@ -166,6 +166,7 @@ services:
       - -metrics=:9103
       - -web=/web # the map at http://localhost:8080
       - -password=murmur # the demo login, user "demo"; local default like the others here
+      - "-login-hint=Demo login: demo / murmur" # shown on the login form; leave out for a real deployment
     ports:
       - "127.0.0.1:8080:8080"
       - "127.0.0.1:9103:9103"

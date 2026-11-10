@@ -99,7 +99,7 @@ func nextStatus(t *testing.T, ctx context.Context, conn *websocket.Conn) statusM
 func TestLogin(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	addr, _ := commandGateway(t, ctx, config{commands: true, user: "demo", password: "secret"})
+	addr, _ := commandGateway(t, ctx, config{commands: true, user: "demo", password: "secret", loginHint: "Demo: demo / secret"})
 
 	if c, code := login(t, addr, "demo", "wrong"); code != http.StatusUnauthorized || c != nil {
 		t.Errorf("wrong password: %d, cookie %v", code, c)
@@ -115,7 +115,7 @@ func TestLogin(t *testing.T) {
 		t.Errorf("cookie %+v", c)
 	}
 
-	who := func(c *http.Cookie) string {
+	session := func(c *http.Cookie) map[string]string {
 		req, _ := http.NewRequest("GET", "http://"+addr+"/api/session", nil)
 		if c != nil {
 			req.AddCookie(c)
@@ -127,13 +127,17 @@ func TestLogin(t *testing.T) {
 		defer res.Body.Close()
 		var body map[string]string
 		json.NewDecoder(res.Body).Decode(&body) //nolint:errcheck
-		return body["user"]
+		return body
 	}
+	who := func(c *http.Cookie) string { return session(c)["user"] }
 	if who(c) != "demo" || who(nil) != "" {
 		t.Errorf("session: %q, without a cookie %q", who(c), who(nil))
 	}
 	if who(&http.Cookie{Name: sessionCookie, Value: "made-up"}) != "" {
 		t.Error("a made-up token was accepted")
+	}
+	if h := session(nil)["hint"]; h != "Demo: demo / secret" {
+		t.Errorf("login hint %q", h)
 	}
 
 	req, _ := http.NewRequest("POST", "http://"+addr+"/api/logout", nil)

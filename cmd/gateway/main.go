@@ -35,6 +35,7 @@ type config struct {
 	maxSubs                                     int
 	commands                                    bool
 	user, password                              string
+	loginHint                                   string
 }
 
 func main() {
@@ -55,6 +56,7 @@ func main() {
 	flag.BoolVar(&cfg.commands, "commands", true, "accept commands from logged-in browsers")
 	flag.StringVar(&cfg.user, "user", "demo", "the demo login's username")
 	flag.StringVar(&cfg.password, "password", "", `the demo login's password; "" for no logins`)
+	flag.StringVar(&cfg.loginHint, "login-hint", "", `text shown under the login form, such as a demo's credentials; "" for none`)
 	flag.Parse()
 	log.SetFlags(log.Ltime)
 	for _, o := range strings.Split(origins, ",") {
@@ -111,7 +113,7 @@ func run(ctx context.Context, cfg config, ready chan<- string) error {
 	h := newHub(cfg.tenant, cfg.timeout, cfg.maxSubs, rdb)
 	h.stale = cfg.stale
 	s := &server{hub: h, nc: nc, throttle: cfg.throttle, origins: cfg.origins, web: cfg.web, commands: cfg.commands,
-		sessions: sessions{rdb: rdb, user: cfg.user, password: cfg.password}, pool: pool}
+		sessions: sessions{rdb: rdb, user: cfg.user, password: cfg.password, hint: cfg.loginHint}, pool: pool}
 	if cfg.commands {
 		if err := runStatus(nc, h); err != nil {
 			return err

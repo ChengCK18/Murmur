@@ -26,6 +26,7 @@ const (
 type sessions struct {
 	rdb            *redis.Client
 	user, password string
+	hint           string // shown under the login form; only a demo sets it
 }
 
 func sessionKey(token string) string { return "session:" + token }
@@ -99,7 +100,12 @@ func (s *server) handleLogout(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{})
 }
 
-// handleSession serves GET /api/session: who is logged in, if anyone.
+// handleSession serves GET /api/session: who is logged in, if anyone, and
+// the login hint, if one is set.
 func (s *server) handleSession(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]string{"user": s.sessions.userOf(r.Context(), cookieToken(r))})
+	body := map[string]string{"user": s.sessions.userOf(r.Context(), cookieToken(r))}
+	if s.sessions.hint != "" {
+		body["hint"] = s.sessions.hint
+	}
+	writeJSON(w, http.StatusOK, body)
 }

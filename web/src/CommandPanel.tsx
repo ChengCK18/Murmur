@@ -11,6 +11,7 @@ interface Props {
   log: CommandUpdate[];
   onSend(type: CommandType, params?: CommandParams): void;
   onLogin(username: string, password: string): Promise<string>;
+  loginHint: string; // shown under the login form, "" for none
   onLogout(): void;
   mission: Mission | null; // what the drone holds
   plan: Waypoint[]; // the mission being drawn
@@ -29,7 +30,7 @@ interface Pending {
 }
 
 // CommandPanel sends commands to the selected drone and shows how each ended.
-export function CommandPanel({ drone, user, log, onSend, onLogin, onLogout, replay, ...mission }: Props) {
+export function CommandPanel({ drone, user, log, onSend, onLogin, loginHint, onLogout, replay, ...mission }: Props) {
   return (
     <section className="panel" aria-label={`Drone ${drone.drone_id}`}>
       <h2>Drone {drone.drone_id}</h2>
@@ -50,14 +51,14 @@ export function CommandPanel({ drone, user, log, onSend, onLogin, onLogout, repl
           <Log log={log} />
         </>
       ) : (
-        <Login onLogin={onLogin} />
+        <Login onLogin={onLogin} hint={loginHint} />
       )}
       {replay}
     </section>
   );
 }
 
-function Login({ onLogin }: { onLogin: Props["onLogin"] }) {
+function Login({ onLogin, hint }: { onLogin: Props["onLogin"]; hint: string }) {
   const [username, setUsername] = useState("demo");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
@@ -87,6 +88,7 @@ function Login({ onLogin }: { onLogin: Props["onLogin"] }) {
         <button type="submit">Log in</button>
       </div>
       {error && <p className="error">{error}</p>}
+      {hint && <p className="hint">{hint}</p>}
     </form>
   );
 }

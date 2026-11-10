@@ -48,6 +48,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Test recordings `testdata/idle.tlog`, `testdata/flight.tlog` and `testdata/restart.tlog`, and the `testdata/missions/square.txt` mission.
 
 ### Changed
+- The demo shows its login under the login form, so nobody has to look it up. It comes from the gateway's new `-login-hint` flag, which only the demo Compose file sets.
 - The map has a dark theme: OpenFreeMap's dark tiles, translucent panels, monospaced numbers, status dots and pills, and red confirm buttons for risky commands.
 - The consumer writes each batch in one statement, raising its limit from about 5,700 to about 14,000 rows a second.
 

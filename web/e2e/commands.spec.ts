@@ -34,6 +34,7 @@ test.afterEach(async ({ page }) => {
 test("sending commands takes a login", async ({ page }) => {
   await selectADrone(page);
   await expect(page.getByRole("button", { name: "Land", exact: true })).toBeHidden();
+  await expect(page.getByText("Demo login: demo / murmur")).toBeVisible(); // a stranger must not have to guess
   await logIn(page, "wrong");
   await expect(page.getByText("wrong username or password")).toBeVisible();
   await expect(page.getByRole("button", { name: "Land", exact: true })).toBeHidden();
