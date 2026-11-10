@@ -194,7 +194,11 @@ button, select, input { font: inherit; color: inherit; }
 
 /* ---- On the map ---- */
 
-.drone { display: flex; align-items: center; gap: 5px; cursor: pointer; }
+/* MapLibre centres the marker element on the drone's position, so the element
+   is the arrow alone; the label hangs beside it, outside the box. */
+.drone { width: 24px; height: 24px; cursor: pointer; }
+.drone .arrow { display: block; }
+.drone .label { position: absolute; left: 29px; top: 50%; transform: translateY(-50%); }
 .drone .arrow {
   fill: var(--live); stroke: rgb(5 10 16 / 0.9); stroke-width: 1.2;
   transition: transform 0.2s linear;

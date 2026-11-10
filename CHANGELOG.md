@@ -52,6 +52,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The consumer writes each batch in one statement, raising its limit from about 5,700 to about 14,000 rows a second.
 
 ### Fixed
+- Drone arrows are drawn where the drones are. MapLibre centred the arrow and its label together, which put the arrow about 70 pixels west of the drone, off its mission route.
 - A cleared link-lost alert now says "Heartbeat back" instead of nothing.
 - `fakegen` follows the ingester to a new IP address, which it can get when restarted; before, the drones kept sending to the old one until `fakegen` was restarted too.
 - The whole stack comes back after a reboot: NATS, TimescaleDB, Redis and Prometheus now have a restart policy, where before the services that need them restarted forever.
