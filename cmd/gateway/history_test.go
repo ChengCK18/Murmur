@@ -17,6 +17,7 @@ func TestHistory(t *testing.T) {
 	if _, err := db.Migrate(ctx, pool); err != nil {
 		t.Fatal(err)
 	}
+	dbtest.StopPolicies(t, pool) // t0 is fixed, so it ages past the 7-day retention
 	t0 := time.Date(2026, 11, 7, 10, 0, 0, 0, time.UTC)
 	insert := func(at time.Duration, msg string, lat, lon *float64, battery *int, payload map[string]any) {
 		t.Helper()

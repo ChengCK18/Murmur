@@ -87,6 +87,7 @@ func newEnv(t *testing.T) *env {
 	if _, err := db.Migrate(ctx, pool); err != nil {
 		t.Fatal(err)
 	}
+	dbtest.StopPolicies(t, pool) // flight.tlog is from 2026-11-01, past the 7-day retention
 	rdb := newRedis(t)
 	nc, err := bus.Connect(natstest.Start(t), "consumer-test")
 	if err != nil {

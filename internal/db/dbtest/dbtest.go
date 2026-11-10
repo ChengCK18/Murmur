@@ -82,3 +82,18 @@ func NewURL(t testing.TB) (*pgxpool.Pool, string) {
 	u.Path = "/" + name
 	return pool, u.String()
 }
+
+// StopPolicies deletes the background jobs of every hypertable, such as the
+// telemetry table's 7-day retention and compression. Call it after migrating.
+// Tests write fixed timestamps, many taken from recordings; once those are
+// older than the retention, its job drops their rows partway through a test,
+// whenever TimescaleDB's scheduler gets to it.
+func StopPolicies(t testing.TB, pool *pgxpool.Pool) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	_, err := pool.Exec(ctx, `SELECT delete_job(job_id) FROM timescaledb_information.jobs WHERE hypertable_name IS NOT NULL`)
+	if err != nil {
+		t.Fatal(err)
+	}
+}
