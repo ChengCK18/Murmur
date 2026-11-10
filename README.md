@@ -74,6 +74,14 @@ Two rules shape the design:
 - **Telemetry is never lost.** JetStream keeps ten minutes of messages, so a consumer or database outage shorter than that loses nothing. A unique key in the database drops the copies a restart redelivers.
 - **Commands never run late.** A command that cannot be delivered now fails visibly. Commands expire after 5 seconds and travel on core NATS, which keeps nothing, so a "take off" sent while the ingester is down cannot fire when it comes back.
 
+Other choices, and why:
+
+- **Commands leave from the socket telemetry arrives on.** A drone on a mobile network sits behind NAT, which lets in only replies to the address it sent to. Answering from port 14560 uses the path the drone's own heartbeats keep open.
+- **Two stores for two questions.** Redis holds each drone's latest state, overwritten in memory, for "can this drone take off now?". TimescaleDB holds every message, for replay and the audit log. Keeping "now" current in PostgreSQL would mean an `UPDATE` per message, 10,000 a second at full load.
+- **The browser gets the newest state, at most four times a second.** Each browser follows only the drones on its screen, and older updates are dropped rather than queued, so one slow browser cannot hold up the others or fall minutes behind.
+- **One command in flight per drone and type, resent up to three times.** MAVLink's `confirmation` field tells the drone a resend is a repeat, and the drone's answer settles the outcome.
+- **Commands are refused during a mission upload.** The plan said they should wait, but a command that waits can run late, which breaks the rule above.
+
 ## What it does
 
 ![The map with a drone selected: its command panel, the commands it has been sent, and the mission it is flying](docs/img/map.png)
@@ -102,6 +110,19 @@ On one desktop (Intel Core i5-8400, 6 cores), with the load generator on the sam
 | A command to 20 drones losing and rejecting some | A final status for every drone in 1.6 s |
 
 The full write-up, with charts, the two bottlenecks found and fixed, and the failure tests, is in [docs/results.md](docs/results.md).
+
+## Limitations and next steps
+
+This is a working prototype, tested with simulated and SITL drones, not with real aircraft. What would change before it flew real drones, roughly in order:
+
+- **Security on the drone link.** MAVLink here is unsigned and unencrypted, and a drone is identified by its source address, which a mobile network can change mid-flight. The fix is MAVLink 2 signing plus a VPN such as WireGuard, which gives each drone a fixed, private address.
+- **A ground-station heartbeat.** The ingester never sends one, so ArduPilot's GCS failsafe cannot tell when the platform has gone.
+- **Real users.** One demo login set by flags, no limit on login attempts, and no TLS of its own: it belongs behind a reverse proxy with HTTPS.
+- **Telling people.** Drone alerts show only on the map, and Prometheus has no alert rules yet. Next: service-level objectives such as "99% of messages stored within 1 s", with burn-rate alerts.
+- **Two known edge cases.** A drone's late answer to a command can be credited to a resend of the same command type, and an alerter far behind the stream could raise link-lost alerts from old data.
+- **ArduCopter only.** The flight-mode numbers are ArduPilot's; PX4 needs its own mapping.
+
+Scaling past one machine: the bus, the consumers and the gateways scale out as they are. The ingester, the commander's one-in-flight check and the alerter keep per-drone state, so they would be split by drone ID, with commands routed to the ingester that hears each drone. The database is the long-term ceiling.
 
 ## Development
 
