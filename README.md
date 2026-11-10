@@ -1,5 +1,7 @@
 # Murmur
 
+[![CI](https://github.com/ChengCK18/Murmur/actions/workflows/ci.yml/badge.svg)](https://github.com/ChengCK18/Murmur/actions/workflows/ci.yml)
+
 Murmur is a telemetry and command platform for drone fleets that speak MAVLink, the protocol of ArduPilot and PX4. It takes in what each drone sends, stores every message, shows the fleet live on a map, and sends commands and missions back.
 
 ![Ten drones on the live map: one is selected, flies an uploaded four-waypoint mission, then the whole fleet is sent home](docs/img/demo.gif)

@@ -1,0 +1,82 @@
+# Every push and pull request: the Go tests with real TimescaleDB and Redis
+# (so none skip), the integration tests without SITL, the web app's checks,
+# and a lint of the Compose file and start.sh. The browser tests and SITL need
+# the whole stack and ArduPilot, so they stay local (make e2e, make itest).
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  go:
+    name: Go unit tests
+    runs-on: ubuntu-24.04
+    services:
+      timescaledb:
+        image: timescale/timescaledb:2.31.0-pg17
+        env: { POSTGRES_USER: murmur, POSTGRES_PASSWORD: murmur, POSTGRES_DB: murmur }
+        ports: ["5432:5432"]
+        options: --health-cmd "pg_isready -U murmur" --health-interval 2s --health-timeout 5s --health-retries 30
+      redis:
+        image: redis:8.10.3-alpine
+        ports: ["6379:6379"]
+        options: --health-cmd "redis-cli ping" --health-interval 2s --health-timeout 5s --health-retries 30
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with: { go-version-file: go.mod }
+      - run: test -z "$(gofmt -l .)" || { gofmt -l .; echo "gofmt needed"; exit 1; }
+      - run: go vet ./...
+      - run: go vet -tags integration ./integration/
+      - run: go test -count=1 -race ./...
+
+  integration:
+    name: Integration tests
+    runs-on: ubuntu-24.04
+    services:
+      timescaledb:
+        image: timescale/timescaledb:2.31.0-pg17
+        env: { POSTGRES_USER: murmur, POSTGRES_PASSWORD: murmur, POSTGRES_DB: murmur }
+        ports: ["5432:5432"]
+        options: --health-cmd "pg_isready -U murmur" --health-interval 2s --health-timeout 5s --health-retries 30
+      redis:
+        image: redis:8.10.3-alpine
+        ports: ["6379:6379"]
+        options: --health-cmd "redis-cli ping" --health-interval 2s --health-timeout 5s --health-retries 30
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with: { go-version-file: go.mod }
+      # The SITL test skips: there is no ArduPilot on the runner.
+      - run: go test -tags integration -count=1 -v ./integration/
+
+  web:
+    name: Web app
+    runs-on: ubuntu-24.04
+    defaults:
+      run: { working-directory: web }
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with: { node-version: 24, cache: npm, cache-dependency-path: web/package-lock.json }
+      - run: npm ci --no-fund --no-audit
+      - run: npx tsc --noEmit
+      - run: npx vitest run
+      - run: npx vite build
+
+  lint:
+    name: Compose and shell
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - run: docker compose -f deploy/docker-compose.yml --profile sitl config -q
+      - run: shellcheck start.sh
