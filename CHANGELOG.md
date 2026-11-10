@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-11-10
+
 ### Added
 - `cmd/ingester`: receives MAVLink over UDP (`-listen`, default `:14560`), gives each drone a drone ID that survives a SITL restart, counts lost frames and heartbeat timeouts, and prints every drone's mode, position, battery and link state once a second.
 - The ingester publishes drone telemetry to the NATS JetStream stream `TELEMETRY` as JSON (`-nats`, default `nats://127.0.0.1:4222`; `-nats ""` for console only).
@@ -64,3 +66,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The map was blank: MapLibre could not find its tile worker in the built app, so no tile was ever loaded. The worker is now bundled and the map draws streets, water and land cover.
 - The gateway answers a missing script or stylesheet with 404 instead of the app's page.
 - The ingester no longer crashes on its first report when the `drones` table holds a drone that has not sent anything since the ingester started.
+
+[Unreleased]: https://github.com/ChengCK18/Murmur/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/ChengCK18/Murmur/releases/tag/v0.1.0
