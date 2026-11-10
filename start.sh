@@ -18,7 +18,7 @@ GRAFANA=http://localhost:3000
 PROMETHEUS=http://localhost:9090
 
 # Colour only on a terminal, so piped output stays plain.
-if [ -t 1 ]; then B=$'\033[1m' R=$'\033[31m' N=$'\033[0m'; else B= R= N=; fi
+if [ -t 1 ]; then B=$'\033[1m' R=$'\033[31m' N=$'\033[0m'; else B='' R='' N=''; fi
 bold() { printf '%s%s%s\n' "$B" "$*" "$N"; }
 fail() {
 	printf '%s%s%s\n' "$R" "$*" "$N" >&2
