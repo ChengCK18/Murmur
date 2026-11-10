@@ -11,8 +11,8 @@ import { altitudeLabel, batteryLabel, followedArea } from "./drones";
 // the worker as a URL makes Vite emit it and tells MapLibre where it is.
 setWorkerUrl(workerUrl);
 
-// Free map tiles, no API key.
-const STYLE = "https://tiles.openfreemap.org/styles/liberty";
+// Free map tiles, no API key; the dark style matches the app.
+const STYLE = "https://tiles.openfreemap.org/styles/dark";
 const HOME: [number, number] = [149.165237, -35.363262]; // ArduPilot SITL home
 
 interface Props {
@@ -56,17 +56,17 @@ export function DroneMap({ drones, selected, onSelect, onArea, route, fence, pla
   pick.current = planning ? onPick : null;
 
   useEffect(() => {
-    const m = new MapLibreMap({ container: container.current!, style: STYLE, center: HOME, zoom: 15 });
+    const m = new MapLibreMap({ container: container.current!, style: STYLE, center: HOME, zoom: 15, attributionControl: { compact: true } });
     map.current = m;
     m.on("click", (e) => pick.current?.({ lat: e.lngLat.lat, lon: e.lngLat.lng }));
     m.on("load", () => {
       m.addSource(FENCE, { type: "geojson", data: fenceArea(fenceRef.current) });
-      m.addLayer({ id: `${FENCE}-fill`, type: "fill", source: FENCE, paint: { "fill-color": "#1f6feb", "fill-opacity": 0.06 } });
-      m.addLayer({ id: `${FENCE}-line`, type: "line", source: FENCE, paint: { "line-color": "#1f6feb", "line-width": 2 } });
+      m.addLayer({ id: `${FENCE}-fill`, type: "fill", source: FENCE, paint: { "fill-color": "#34d399", "fill-opacity": 0.07 } });
+      m.addLayer({ id: `${FENCE}-line`, type: "line", source: FENCE, paint: { "line-color": "#34d399", "line-width": 1.5, "line-opacity": 0.9 } });
       m.addSource(TRACK, { type: "geojson", data: routeLine(trackRef.current) });
-      m.addLayer({ id: TRACK, type: "line", source: TRACK, paint: { "line-color": "#8250df", "line-width": 2, "line-opacity": 0.8 } });
+      m.addLayer({ id: TRACK, type: "line", source: TRACK, paint: { "line-color": "#a78bfa", "line-width": 2.5, "line-opacity": 0.85 } });
       m.addSource(ROUTE, { type: "geojson", data: routeLine(routeRef.current) });
-      m.addLayer({ id: ROUTE, type: "line", source: ROUTE, paint: { "line-color": "#d97706", "line-width": 3, "line-dasharray": [2, 1] } });
+      m.addLayer({ id: ROUTE, type: "line", source: ROUTE, paint: { "line-color": "#f5a524", "line-width": 2.5, "line-dasharray": [2, 1.5] } });
     });
     const report = () => {
       const b = m.getBounds();

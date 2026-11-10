@@ -12,8 +12,14 @@ interface Props {
 export function DroneList({ drones, selected, onSelect, children }: Props) {
   return (
     <aside className="list">
-      <h1>Drones ({drones.length})</h1>
+      <div className="brand">
+        <svg viewBox="-10 -10 20 20" width="18" height="18" aria-hidden="true">
+          <path d="M0,-9 L7,8 L0,4 L-7,8 Z" />
+        </svg>
+        Murmur
+      </div>
       {children}
+      <h1>Drones ({drones.length})</h1>
       {drones.length === 0 && <p className="empty">No drones yet.</p>}
       <ul>
         {drones.map((d) => (
