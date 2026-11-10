@@ -122,3 +122,7 @@ The browser tests need Google Chrome installed and Playwright's Firefox (`cd web
 | `testdata/` | MAVLink recorded from ArduPilot's simulator, used by the unit tests |
 
 [CHANGELOG.md](CHANGELOG.md) lists every change.
+
+## Licence
+
+[MIT](LICENSE). The SITL image builds [ArduPilot](https://github.com/ArduPilot/ardupilot), which is GPLv3, from its own repository; none of its code is in this one. Map tiles are from [OpenFreeMap](https://openfreemap.org), with data © OpenStreetMap contributors.
