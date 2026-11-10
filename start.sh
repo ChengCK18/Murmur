@@ -8,7 +8,7 @@
 #   ./start.sh logs [service]   follow the logs, of one service or all
 #   ./start.sh stop       stop everything; the stored data is kept
 #
-# Needs only Docker with Compose v2.
+# Needs only Docker with Compose v2, and bash 3.2 or later (macOS's own).
 set -euo pipefail
 
 cd "$(dirname "$0")"
@@ -70,10 +70,12 @@ start() {
 		bold "Building and starting Murmur with SITL (the first build compiles ArduPilot, about 5 minutes)"
 	else
 		# Every service but SITL, so a SITL started earlier is left alone.
-		mapfile -t services < <(docker compose -f deploy/docker-compose.yml config --services)
+		# A read loop, not mapfile: macOS ships bash 3.2, which lacks it.
+		while IFS= read -r svc; do services+=("$svc"); done < <(docker compose -f deploy/docker-compose.yml config --services)
 		bold "Building and starting Murmur"
 	fi
-	if ! "${COMPOSE[@]}" up -d --build --wait "${services[@]}"; then
+	# ${a[@]+...}: bash before 4.4 calls an empty array unbound under set -u.
+	if ! "${COMPOSE[@]}" up -d --build --wait ${services[@]+"${services[@]}"}; then
 		echo
 		"${COMPOSE[@]}" ps
 		fail "Something did not start. See its logs with: ./start.sh logs <service>"
