@@ -2,6 +2,8 @@
 
 Murmur is a telemetry and command platform for drone fleets that speak MAVLink, the protocol of ArduPilot and PX4. It takes in what each drone sends, stores every message, shows the fleet live on a map, and sends commands and missions back.
 
+![Ten drones on the live map: one is selected, flies an uploaded four-waypoint mission, then the whole fleet is sent home](docs/img/demo.gif)
+
 It runs on one machine with Docker. It carried **10,000 messages a second from 1,000 drones with no loss**, and passes tests that kill each of its services under load ([results](docs/results.md)).
 
 > **Local only.** MAVLink over UDP has no authentication, and every password in this repository is a local default. Do not expose these ports to a network. Real drones would need an agent on board with an encrypted link, which is not part of this version.
@@ -72,6 +74,8 @@ Two rules shape the design:
 
 ## What it does
 
+![The map with a drone selected: its command panel, the commands it has been sent, and the mission it is flying](docs/img/map.png)
+
 - **Live map:** every drone turned to its heading with altitude and battery, greyed out when its link is lost. The browser follows only what is on screen, so a big fleet does not flood it.
 - **Commands:** arm, disarm, set mode, take off, return to launch and land, each with a status from pending to accepted, rejected, timed out or unreachable. Arm and takeoff ask for confirmation.
 - **Fleet commands:** "Return all to launch" goes to every drone at once, with totals and the failures listed drone by drone.
@@ -79,6 +83,8 @@ Two rules shape the design:
 - **Alerts:** low battery, link lost and leaving a geofence drawn on the map. Each is stored, and shown in every open browser.
 - **Replay:** any drone's stored flight played back with a time scrubber.
 - **Dashboards:** Grafana shows the pipeline (rates, loss, queue lag and latency) and the fleet (messages stored, alerts and commands).
+
+![The Grafana pipeline dashboard: drones, links, message rate, queue lag, loss, write time and latency](docs/img/grafana.png)
 
 ## Results
 
@@ -109,7 +115,7 @@ make e2e        # browser tests in Chrome and Firefox, against the running stack
 make failures   # kills each service under load and checks the limits (about 10 minutes)
 ```
 
-The browser tests need Google Chrome installed and Playwright's Firefox (`cd web && npx playwright install firefox`).
+The browser tests need Google Chrome installed and Playwright's Firefox (`cd web && npx playwright install firefox`). `cd web && npm run record` re-records the GIF and screenshots in this README from the running stack; it needs ffmpeg.
 
 | Directory | What is in it |
 |---|---|
