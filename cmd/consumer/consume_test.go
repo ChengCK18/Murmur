@@ -113,6 +113,7 @@ func (e *env) publishFlight(t *testing.T) []schema.Telemetry {
 	}
 	d, _ := mavlink.NewDecoder()
 	var out []schema.Telemetry
+	var acks []jetstream.PubAckFuture
 	for _, rec := range recs {
 		frames, _ := d.Decode(rec.Time, netip.AddrPort{}, rec.Frame)
 		for _, r := range frames {
@@ -124,9 +125,11 @@ func (e *env) publishFlight(t *testing.T) []schema.Telemetry {
 				t.Fatal(err)
 			}
 			data, _ := json.Marshal(m)
-			if _, err := e.js.PublishAsync(m.Subject(), data, jetstream.WithMsgID(m.DedupID())); err != nil {
+			ack, err := e.js.PublishAsync(m.Subject(), data, jetstream.WithMsgID(m.DedupID()))
+			if err != nil {
 				t.Fatal(err)
 			}
+			acks = append(acks, ack)
 			out = append(out, m)
 		}
 	}
@@ -134,6 +137,15 @@ func (e *env) publishFlight(t *testing.T) []schema.Telemetry {
 	case <-e.js.PublishAsyncComplete():
 	case <-e.ctx.Done():
 		t.Fatal("publish not acknowledged")
+	}
+	// Complete means answered, not stored: a refused message would leave the
+	// test expecting rows that were never in the stream.
+	for i, ack := range acks {
+		select {
+		case <-ack.Ok():
+		case err := <-ack.Err():
+			t.Fatalf("message %d not stored: %v", i, err)
+		}
 	}
 	return out
 }
@@ -165,9 +177,16 @@ func (e *env) runUntil(t *testing.T, c *consumer, done func() bool) {
 	<-stopped
 }
 
-// drained reports whether the durable consumer has nothing left to deliver
-// or acknowledge.
-func (e *env) drained(c *consumer) bool {
+// stored reports whether the database holds want rows and the durable
+// consumer has nothing left to deliver or acknowledge. The server's counters
+// alone are not enough: once, on a slow CI runner, they read zero while a
+// batch of 500 was still to come, and the test checked too early. A message
+// really lost never reaches want, so the test times out with the stats.
+func (e *env) stored(c *consumer, want int) bool {
+	var n int
+	if err := e.pool.QueryRow(e.ctx, "SELECT count(*) FROM telemetry").Scan(&n); err != nil || n < want {
+		return false
+	}
 	info, err := c.cons.Info(e.ctx)
 	return err == nil && info.NumPending == 0 && info.NumAckPending == 0
 }
@@ -224,7 +243,7 @@ func TestConsumeFlight(t *testing.T) {
 	e := newEnv(t)
 	sent := e.publishFlight(t)
 	c := e.newConsumer(t, 500)
-	e.runUntil(t, c, func() bool { return e.drained(c) })
+	e.runUntil(t, c, func() bool { return e.stored(c, len(sent)) })
 	e.checkStored(t, sent)
 	if c.stats.duplicates.Load() != 0 || c.stats.rejected.Load() != 0 || c.stats.failed.Load() != 0 {
 		t.Errorf("stats %s", c.stats.String())
@@ -247,7 +266,7 @@ func TestRestartLosesNothing(t *testing.T) {
 	}
 
 	second := e.newConsumer(t, 100)
-	e.runUntil(t, second, func() bool { return e.drained(second) })
+	e.runUntil(t, second, func() bool { return e.stored(second, len(sent)) })
 	e.checkStored(t, sent)
 	t.Logf("first: %s; second: %s", first.stats.String(), second.stats.String())
 }
@@ -269,7 +288,7 @@ func TestRedisFailureRedelivers(t *testing.T) {
 	// Redis back: the batches come again, the database drops what it has,
 	// and Redis catches up.
 	c.rdb = good
-	e.runUntil(t, c, func() bool { return e.drained(c) })
+	e.runUntil(t, c, func() bool { return e.stored(c, len(sent)) })
 	e.checkStored(t, sent)
 	if c.stats.duplicates.Load() == 0 {
 		t.Errorf("no redelivered rows: %s", c.stats.String())
@@ -302,7 +321,7 @@ func TestConsumerMetrics(t *testing.T) {
 	c := e.newConsumer(t, 500)
 	reg := metrics.NewRegistry()
 	c.obs = newObservers(reg, c)
-	e.runUntil(t, c, func() bool { return e.drained(c) })
+	e.runUntil(t, c, func() bool { return e.stored(c, len(sent)) })
 	c.obs.trackLag(canceled(), c, time.Hour) // one refresh, then return
 
 	snap, err := metrics.Snapshot(reg)
