@@ -1,0 +1,148 @@
+{{- /*
+NATS with JetStream: a StatefulSet of servers that form one cluster.
+
+A StatefulSet, not a Deployment, because each server has a fixed name
+(nats-0, nats-1, nats-2), a DNS name of its own and its own volume, which
+follows it if it restarts. The servers find each other through the headless
+Service, and clients reach any of them through the "nats" Service.
+*/ -}}
+{{- $n := int .Values.nats.replicas }}
+{{- if not (has $n (list 1 3 5)) }}
+{{- fail "nats.replicas must be 1, 3 or 5: an odd number, so a majority remains after a failure" }}
+{{- end }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: nats-config
+  labels:
+    {{- include "murmur.labels" . | nindent 4 }}
+data:
+  nats.conf: |
+    port: 4222
+    http_port: 8222
+    # nats-0, nats-1, ...: a JetStream cluster needs a unique name per server.
+    server_name: $POD_NAME
+    jetstream {
+      store_dir: /data
+      max_file_store: {{ .Values.nats.storage | replace "Gi" "G" | replace "Mi" "M" }}
+    }
+    {{- if gt $n 1 }}
+    cluster {
+      name: murmur
+      port: 6222
+      # Every server, itself included; NATS skips its own address.
+      routes: [
+        {{- range $i := until $n }}
+        nats://nats-{{ $i }}.nats-headless:6222
+        {{- end }}
+      ]
+    }
+    {{- end }}
+---
+# Headless (no cluster IP): gives each server its own DNS name,
+# nats-0.nats-headless and so on, for the cluster routes above.
+apiVersion: v1
+kind: Service
+metadata:
+  name: nats-headless
+  labels:
+    {{- include "murmur.labels" . | nindent 4 }}
+spec:
+  clusterIP: None
+  # Names exist before the servers are ready: a server only becomes ready
+  # once it has found the others, so waiting would deadlock.
+  publishNotReadyAddresses: true
+  selector:
+    app.kubernetes.io/name: nats
+  ports:
+    - { name: client, port: 4222 }
+    - { name: cluster, port: 6222 }
+    - { name: monitor, port: 8222 }
+---
+# For clients: any ready server.
+apiVersion: v1
+kind: Service
+metadata:
+  name: nats
+  labels:
+    {{- include "murmur.labels" . | nindent 4 }}
+spec:
+  selector:
+    app.kubernetes.io/name: nats
+  ports:
+    - { name: client, port: 4222 }
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: nats
+  labels:
+    {{- include "murmur.labels" . | nindent 4 }}
+spec:
+  serviceName: nats-headless
+  replicas: {{ $n }}
+  podManagementPolicy: Parallel # start all at once; they need each other to form the cluster
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: nats
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: nats
+        {{- include "murmur.labels" . | nindent 8 }}
+      annotations:
+        checksum/config: {{ .Values.nats | toJson | sha256sum }} # restart on config changes
+    spec:
+      # One server per node, or losing a node could lose two copies at once.
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - topologyKey: kubernetes.io/hostname
+              labelSelector:
+                matchLabels:
+                  app.kubernetes.io/name: nats
+      terminationGracePeriodSeconds: 60 # time to hand stream leadership to another server
+      containers:
+        - name: nats
+          image: {{ .Values.nats.image }}
+          args: ["--config", "/etc/nats/nats.conf"]
+          env:
+            - name: POD_NAME
+              valueFrom: { fieldRef: { fieldPath: metadata.name } }
+          ports:
+            - { name: client, containerPort: 4222 }
+            - { name: cluster, containerPort: 6222 }
+            - { name: monitor, containerPort: 8222 }
+          # The same checks as the official NATS chart. Started: the server
+          # has joined the cluster and caught up with the stream. Ready, to
+          # take clients: the server answers, whatever its stream's state.
+          # Alive: JetStream is on; deliberately not a check on the stream,
+          # or a cluster that loses its majority would have every server
+          # restarted, which makes it worse.
+          startupProbe:
+            httpGet: { path: /healthz, port: monitor }
+            periodSeconds: 2
+            failureThreshold: 90
+          readinessProbe:
+            httpGet: { path: "/healthz?js-server-only=true", port: monitor }
+            periodSeconds: 5
+          livenessProbe:
+            httpGet: { path: "/healthz?js-enabled-only=true", port: monitor }
+            periodSeconds: 30
+            failureThreshold: 3
+          resources:
+            {{- toYaml .Values.nats.resources | nindent 12 }}
+          volumeMounts:
+            - { name: config, mountPath: /etc/nats }
+            - { name: data, mountPath: /data }
+      volumes:
+        - name: config
+          configMap: { name: nats-config }
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: [ReadWriteOnce]
+        resources:
+          requests:
+            storage: {{ .Values.nats.storage }}

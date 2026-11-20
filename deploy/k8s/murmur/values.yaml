@@ -1,0 +1,31 @@
+# Settings for the Murmur chart (make k8s-up). The defaults suit the local
+# kind cluster (deploy/k8s/kind.yaml); the passwords here are local defaults,
+# like the ones in deploy/docker-compose.yml, and must be overridden anywhere
+# else (helm --set or a values file kept out of git).
+
+nats:
+  image: nats:2.15.2-alpine
+  # NATS servers, and so copies of the telemetry stream. 3 survives losing
+  # one server, since 2 of 3 is still a majority; 1 for a single node. Each
+  # server needs a node of its own.
+  replicas: 3
+  storage: 1Gi # JetStream files per server; the stream keeps 10 minutes
+  resources:
+    requests: { cpu: 50m, memory: 64Mi }
+    limits: { memory: 512Mi }
+
+timescaledb:
+  image: timescale/timescaledb:2.31.0-pg17
+  storage: 2Gi
+  user: murmur
+  password: murmur
+  database: murmur
+  resources:
+    requests: { cpu: 100m, memory: 256Mi }
+    limits: { memory: 1Gi }
+
+redis:
+  image: redis:8.10.3-alpine
+  resources:
+    requests: { cpu: 25m, memory: 32Mi }
+    limits: { memory: 128Mi }

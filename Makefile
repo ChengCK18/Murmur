@@ -3,7 +3,7 @@
 export GOTOOLCHAIN := local
 COMPOSE := docker compose -f deploy/docker-compose.yml
 
-.PHONY: test itest web-test e2e failures infra up sitl down kind-up kind-down
+.PHONY: test itest web-test e2e failures infra up sitl down kind-up kind-down k8s-up k8s-down
 
 test: ## unit tests; database and Redis tests skip if the infrastructure is not running
 	go test -count=1 ./...
@@ -43,3 +43,10 @@ kind-up: ## a local Kubernetes cluster (kind) with Murmur's images built and loa
 kind-down: ## delete the kind cluster
 	kind delete cluster --name $(KIND_CLUSTER)
 
+HELM := helm --kube-context kind-$(KIND_CLUSTER) --namespace murmur
+
+k8s-up: ## install or upgrade Murmur's chart on the kind cluster (make kind-up first)
+	$(HELM) upgrade --install murmur deploy/k8s/murmur --create-namespace --wait --timeout 5m
+
+k8s-down: ## uninstall the chart; the NATS and database volumes are kept
+	$(HELM) uninstall murmur --wait

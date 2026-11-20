@@ -1,0 +1,67 @@
+{{- /*
+TimescaleDB: one server with a volume of its own. A single copy, so it is the
+part of the platform that does not survive losing its node; elsewhere this
+would be a managed or replicated Postgres.
+*/ -}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: timescaledb
+  labels:
+    {{- include "murmur.labels" . | nindent 4 }}
+spec:
+  selector:
+    app.kubernetes.io/name: timescaledb
+  ports:
+    - { name: postgres, port: 5432 }
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: timescaledb
+  labels:
+    {{- include "murmur.labels" . | nindent 4 }}
+spec:
+  serviceName: timescaledb
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: timescaledb
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: timescaledb
+        {{- include "murmur.labels" . | nindent 8 }}
+    spec:
+      containers:
+        - name: timescaledb
+          image: {{ .Values.timescaledb.image }}
+          envFrom:
+            - secretRef: { name: murmur-db } # POSTGRES_USER, _PASSWORD, _DB
+          env:
+            # A directory below the mount point, which Postgres requires to be
+            # empty when it first creates the database.
+            - { name: PGDATA, value: /var/lib/postgresql/data/pgdata }
+          ports:
+            - { name: postgres, containerPort: 5432 }
+          readinessProbe:
+            exec:
+              command: ["sh", "-c", 'pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB"']
+            periodSeconds: 5
+          livenessProbe:
+            exec:
+              command: ["sh", "-c", 'pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB"']
+            initialDelaySeconds: 30
+            periodSeconds: 30
+          resources:
+            {{- toYaml .Values.timescaledb.resources | nindent 12 }}
+          volumeMounts:
+            - { name: data, mountPath: /var/lib/postgresql/data }
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: [ReadWriteOnce]
+        resources:
+          requests:
+            storage: {{ .Values.timescaledb.storage }}
