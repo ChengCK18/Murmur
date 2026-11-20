@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Kubernetes: `make kind-up` creates a local kind cluster of three workers and `make k8s-up` installs the Helm chart in `deploy/k8s/murmur`: three NATS servers with the stream kept on each, TimescaleDB, Redis, the ingester on the edge node taking MAVLink on UDP 14570, two consumers, two gateways serving the map on http://localhost:8090, the commander, the alerter and 10 fake drones.
 - `-stream-replicas` on the ingester, consumer, gateway and alerter: how many NATS servers keep a copy of the `TELEMETRY` stream (default 1; 3 on a three-server cluster). Give every service the same value.
 
 ## [0.1.0] - 2026-11-10

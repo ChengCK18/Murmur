@@ -13,3 +13,30 @@ helm.sh/chart: {{ .Chart.Name }}-{{ .Chart.Version }}
 {{- end -}}
 {{ join "," $urls }}
 {{- end }}
+
+{{/* A Murmur service's image: murmur.image "ingester" . */}}
+{{- define "murmur.image" -}}
+{{- $root := index . 1 -}}
+image: {{ printf "%s/%s:%s" $root.Values.image.repository (index . 0) $root.Values.image.tag }}
+imagePullPolicy: {{ $root.Values.image.pullPolicy }}
+{{- end }}
+
+{{/* The flags every service that talks to NATS shares; the stream keeps one copy per NATS server. */}}
+{{- define "murmur.natsArgs" -}}
+- -nats={{ include "murmur.natsURL" . }}
+- -stream-replicas={{ .Values.nats.replicas }}
+{{- end }}
+
+{{/* DATABASE_URL from the Secret, for args to use as $(DATABASE_URL). */}}
+{{- define "murmur.dbEnv" -}}
+- name: DATABASE_URL
+  valueFrom:
+    secretKeyRef: { name: murmur-db, key: DATABASE_URL }
+{{- end }}
+
+{{/* Ready once /metrics answers, as in Docker Compose. */}}
+{{- define "murmur.metricsProbe" -}}
+readinessProbe:
+  httpGet: { path: /metrics, port: metrics }
+  periodSeconds: 5
+{{- end }}

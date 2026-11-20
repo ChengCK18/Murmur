@@ -1,0 +1,53 @@
+{{- /*
+The commander: one copy, and Recreate rather than a rolling update. It takes
+command requests on plain NATS subscriptions, not a queue group, so two
+copies would each run every command, even for the moment a rolling update
+overlaps them. If it is down, commands fail at once, as they should: they
+are not queued (internal/bus).
+*/ -}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: commander
+  labels:
+    {{- include "murmur.labels" . | nindent 4 }}
+    app.kubernetes.io/name: commander
+spec:
+  selector:
+    app.kubernetes.io/name: commander
+  ports:
+    - { name: metrics, port: 9104 }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: commander
+  labels:
+    {{- include "murmur.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  strategy: { type: Recreate }
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: commander
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: commander
+        {{- include "murmur.labels" . | nindent 8 }}
+    spec:
+      containers:
+        - name: commander
+          {{- include "murmur.image" (list "commander" .) | nindent 10 }}
+          args:
+            - -nats={{ include "murmur.natsURL" . }}
+            - -db=$(DATABASE_URL)
+            - -redis=redis:6379
+            - -metrics=:9104
+          env:
+            {{- include "murmur.dbEnv" . | nindent 12 }}
+          ports:
+            - { name: metrics, containerPort: 9104 }
+          {{- include "murmur.metricsProbe" . | nindent 10 }}
+          resources:
+            {{- toYaml .Values.commander.resources | nindent 12 }}

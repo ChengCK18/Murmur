@@ -29,3 +29,53 @@ redis:
   resources:
     requests: { cpu: 25m, memory: 32Mi }
     limits: { memory: 128Mi }
+
+# Murmur's own services. Images are murmur/<service>:<tag>, built and loaded
+# into kind by make kind-up; IfNotPresent uses the loaded one.
+image:
+  repository: murmur
+  tag: dev
+  pullPolicy: IfNotPresent
+
+ingester:
+  # The node port drones send MAVLink to, on the edge node (UDP 14570 on the
+  # host, via deploy/k8s/kind.yaml).
+  nodePort: 30560
+  resources:
+    requests: { cpu: 100m, memory: 64Mi }
+    limits: { memory: 256Mi }
+
+consumer:
+  replicas: 2 # they share one durable consumer, so each message goes to one
+  batch: 500
+  resources:
+    requests: { cpu: 100m, memory: 64Mi }
+    limits: { memory: 256Mi }
+
+gateway:
+  replicas: 2 # any copy serves any browser: sessions are in Redis
+  nodePort: 30080 # the map, http://localhost:8090 on the host
+  user: demo
+  password: murmur # the demo login; "" for no logins
+  loginHint: "Demo login: demo / murmur" # "" for none
+  resources:
+    requests: { cpu: 50m, memory: 64Mi }
+    limits: { memory: 256Mi }
+
+commander:
+  resources:
+    requests: { cpu: 25m, memory: 32Mi }
+    limits: { memory: 128Mi }
+
+alerter:
+  lowBattery: 20
+  resources:
+    requests: { cpu: 25m, memory: 32Mi }
+    limits: { memory: 128Mi }
+
+fakegen:
+  enabled: true
+  count: 10 # fake drones, 10 messages a second each
+  resources:
+    requests: { cpu: 25m, memory: 16Mi }
+    limits: { memory: 64Mi }

@@ -1,0 +1,62 @@
+{{- /*
+The ingester: one copy, on the edge node. One copy, because it keeps each
+drone's state (the registry) and UDP has no connections to share out; more
+drones means more edge sites, each with its own ingester, not copies of
+this one. Recreate, not a rolling update, so two never run at once.
+*/ -}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: ingester
+  labels:
+    {{- include "murmur.labels" . | nindent 4 }}
+    app.kubernetes.io/name: ingester
+spec:
+  type: NodePort
+  # Traffic from outside stays on the node it arrived at, which is the
+  # ingester's, so drones' source addresses are kept: the ingester tells
+  # drones apart by them, and sends commands back to them.
+  externalTrafficPolicy: Local
+  selector:
+    app.kubernetes.io/name: ingester
+  ports:
+    - { name: mavlink, protocol: UDP, port: 14560, nodePort: {{ .Values.ingester.nodePort }} }
+    - { name: metrics, port: 9101 }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ingester
+  labels:
+    {{- include "murmur.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  strategy: { type: Recreate }
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: ingester
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: ingester
+        {{- include "murmur.labels" . | nindent 8 }}
+    spec:
+      nodeSelector:
+        murmur.io/edge: "true" # where the UDP port is open on the host
+      containers:
+        - name: ingester
+          {{- include "murmur.image" (list "ingester" .) | nindent 10 }}
+          args:
+            - -listen=:14560
+            {{- include "murmur.natsArgs" . | nindent 12 }}
+            - -db=$(DATABASE_URL)
+            - -metrics=:9101
+            - -interval=10s
+          env:
+            {{- include "murmur.dbEnv" . | nindent 12 }}
+          ports:
+            - { name: mavlink, protocol: UDP, containerPort: 14560 }
+            - { name: metrics, containerPort: 9101 }
+          {{- include "murmur.metricsProbe" . | nindent 10 }}
+          resources:
+            {{- toYaml .Values.ingester.resources | nindent 12 }}

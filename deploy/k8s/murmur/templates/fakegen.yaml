@@ -1,0 +1,32 @@
+{{- if .Values.fakegen.enabled }}
+{{- /*
+Fake drones, sending to the ingester's Service from inside the cluster.
+fakegen looks the name up again every few seconds, so it follows the
+ingester if it moves. Raise fakegen.count to load the platform.
+*/ -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: fakegen
+  labels:
+    {{- include "murmur.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: fakegen
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: fakegen
+        {{- include "murmur.labels" . | nindent 8 }}
+    spec:
+      containers:
+        - name: fakegen
+          {{- include "murmur.image" (list "fakegen" .) | nindent 10 }}
+          args:
+            - -count={{ .Values.fakegen.count }}
+            - -target=ingester:14560
+          resources:
+            {{- toYaml .Values.fakegen.resources | nindent 12 }}
+{{- end }}

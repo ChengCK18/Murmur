@@ -40,6 +40,17 @@ Ten simulated drones fly circles, lines and survey patterns near ArduPilot's tes
 
 The script is a wrapper around `docker compose -f deploy/docker-compose.yml`. To delete the stored data as well: `docker compose -f deploy/docker-compose.yml --profile sitl down -v`.
 
+### On Kubernetes
+
+A local cluster with [kind](https://kind.sigs.k8s.io/): one control plane and three workers, with three NATS servers keeping three copies of the stream, two consumers and two gateways. You also need kind, kubectl and Helm.
+
+```sh
+make kind-up    # creates the cluster and loads the images; again after code changes
+make k8s-up     # installs the Helm chart in deploy/k8s/murmur
+```
+
+The map is on http://localhost:8090 and the cluster takes MAVLink on UDP 127.0.0.1:14570, ports apart from Compose's so both can run at once. `make k8s-down` removes the chart and `make kind-down` the cluster.
+
 ## Architecture
 
 ```mermaid
@@ -146,7 +157,7 @@ The browser tests need Google Chrome installed and Playwright's Firefox (`cd web
 | `internal/` | Shared packages: MAVLink decoding, drone IDs, loss counting, the NATS messages, commands and alerts |
 | `migrations/` | The database schema, applied by the services at start |
 | `web/` | The map: React, TypeScript and MapLibre |
-| `deploy/` | Docker Compose, the SITL image, Prometheus and Grafana |
+| `deploy/` | Docker Compose, the Kubernetes cluster and Helm chart (`k8s/`), the SITL image, Prometheus and Grafana |
 | `loadtest/` | The load and failure tests, and their recorded results |
 | `testdata/` | MAVLink recorded from ArduPilot's simulator, used by the unit tests |
 

@@ -1,0 +1,52 @@
+{{- /*
+The alerter: one copy, and Recreate. It keeps each drone's alert state in
+memory and answers geofence and active-alert requests on plain NATS
+subscriptions, so a second copy would split the telemetry between them and
+answer every request twice.
+*/ -}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: alerter
+  labels:
+    {{- include "murmur.labels" . | nindent 4 }}
+    app.kubernetes.io/name: alerter
+spec:
+  selector:
+    app.kubernetes.io/name: alerter
+  ports:
+    - { name: metrics, port: 9105 }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: alerter
+  labels:
+    {{- include "murmur.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  strategy: { type: Recreate }
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: alerter
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: alerter
+        {{- include "murmur.labels" . | nindent 8 }}
+    spec:
+      containers:
+        - name: alerter
+          {{- include "murmur.image" (list "alerter" .) | nindent 10 }}
+          args:
+            {{- include "murmur.natsArgs" . | nindent 12 }}
+            - -db=$(DATABASE_URL)
+            - -low-battery={{ .Values.alerter.lowBattery }}
+            - -metrics=:9105
+          env:
+            {{- include "murmur.dbEnv" . | nindent 12 }}
+          ports:
+            - { name: metrics, containerPort: 9105 }
+          {{- include "murmur.metricsProbe" . | nindent 10 }}
+          resources:
+            {{- toYaml .Values.alerter.resources | nindent 12 }}

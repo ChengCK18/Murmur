@@ -1,0 +1,80 @@
+{{- /*
+The gateway: the map and its WebSocket. Every copy reads the whole stream
+and sessions are in Redis, so any copy can serve any browser, and the
+Service needs no sticky sessions. A WebSocket stays on the copy it opened
+on; if that copy goes, the map reconnects to another.
+*/ -}}
+apiVersion: v1
+kind: Secret
+metadata:
+  name: murmur-gateway
+  labels:
+    {{- include "murmur.labels" . | nindent 4 }}
+type: Opaque
+stringData:
+  PASSWORD: {{ .Values.gateway.password | quote }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: gateway
+  labels:
+    {{- include "murmur.labels" . | nindent 4 }}
+    app.kubernetes.io/name: gateway
+spec:
+  type: NodePort
+  selector:
+    app.kubernetes.io/name: gateway
+  ports:
+    - { name: http, port: 8080, nodePort: {{ .Values.gateway.nodePort }} }
+    - { name: metrics, port: 9103 }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gateway
+  labels:
+    {{- include "murmur.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.gateway.replicas }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: gateway
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: gateway
+        {{- include "murmur.labels" . | nindent 8 }}
+    spec:
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: gateway
+      containers:
+        - name: gateway
+          {{- include "murmur.image" (list "gateway" .) | nindent 10 }}
+          args:
+            {{- include "murmur.natsArgs" . | nindent 12 }}
+            - -redis=redis:6379
+            - -db=$(DATABASE_URL) # for replay
+            - -metrics=:9103
+            - -web=/web
+            - {{ printf "-user=%s" .Values.gateway.user | quote }}
+            - -password=$(PASSWORD)
+            - {{ printf "-login-hint=%s" .Values.gateway.loginHint | quote }}
+          env:
+            {{- include "murmur.dbEnv" . | nindent 12 }}
+            - name: PASSWORD
+              valueFrom:
+                secretKeyRef: { name: murmur-gateway, key: PASSWORD }
+          ports:
+            - { name: http, containerPort: 8080 }
+            - { name: metrics, containerPort: 9103 }
+          readinessProbe:
+            httpGet: { path: /api/health, port: http }
+            periodSeconds: 5
+          resources:
+            {{- toYaml .Values.gateway.resources | nindent 12 }}
