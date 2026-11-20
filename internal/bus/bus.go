@@ -22,13 +22,18 @@ const (
 
 // TelemetryStreamConfig is the TELEMETRY stream (guide step 2.3). Ten minutes
 // of history covers a consumer restart; long-term storage is TimescaleDB.
-func TelemetryStreamConfig() jetstream.StreamConfig {
+//
+// replicas is how many NATS servers keep a copy: 1 for a single server, 3 for
+// a three-server cluster, which then survives losing one. The durable
+// consumers inherit it.
+func TelemetryStreamConfig(replicas int) jetstream.StreamConfig {
 	return jetstream.StreamConfig{
 		Name:       TelemetryStream,
 		Subjects:   []string{TelemetrySubjects},
 		Storage:    jetstream.FileStorage,
 		MaxAge:     10 * time.Minute,
 		Duplicates: 2 * time.Minute, // window for Nats-Msg-Id de-duplication
+		Replicas:   replicas,
 	}
 }
 
@@ -48,9 +53,11 @@ func Connect(url, name string) (*nats.Conn, error) {
 }
 
 // EnsureTelemetryStream creates the TELEMETRY stream, or updates it to the
-// current configuration if it already exists.
-func EnsureTelemetryStream(ctx context.Context, js jetstream.JetStream) (jetstream.Stream, error) {
-	s, err := js.CreateOrUpdateStream(ctx, TelemetryStreamConfig())
+// current configuration if it already exists. Every service that calls it
+// must be given the same replicas, or each start changes the stream's
+// replication back to its own value.
+func EnsureTelemetryStream(ctx context.Context, js jetstream.JetStream, replicas int) (jetstream.Stream, error) {
+	s, err := js.CreateOrUpdateStream(ctx, TelemetryStreamConfig(replicas))
 	if err != nil {
 		return nil, fmt.Errorf("bus: stream %s: %w", TelemetryStream, err)
 	}

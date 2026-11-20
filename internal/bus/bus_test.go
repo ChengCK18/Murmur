@@ -31,13 +31,13 @@ func TestEnsureTelemetryStream(t *testing.T) {
 	ctx, js := setup(t)
 
 	// An older configuration is brought up to date.
-	old := TelemetryStreamConfig()
+	old := TelemetryStreamConfig(1)
 	old.MaxAge = time.Hour
 	if _, err := js.CreateStream(ctx, old); err != nil {
 		t.Fatal(err)
 	}
 	for range 2 { // and running it again is harmless
-		if _, err := EnsureTelemetryStream(ctx, js); err != nil {
+		if _, err := EnsureTelemetryStream(ctx, js, 1); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -47,14 +47,26 @@ func TestEnsureTelemetryStream(t *testing.T) {
 	}
 	cfg := s.CachedInfo().Config
 	if cfg.MaxAge != 10*time.Minute || cfg.Duplicates != 2*time.Minute ||
-		cfg.Storage != jetstream.FileStorage || len(cfg.Subjects) != 1 || cfg.Subjects[0] != "telemetry.>" {
+		cfg.Storage != jetstream.FileStorage || len(cfg.Subjects) != 1 || cfg.Subjects[0] != "telemetry.>" ||
+		cfg.Replicas != 1 {
 		t.Errorf("config %+v", cfg)
+	}
+}
+
+// The replica count reaches the stream's configuration; a cluster of three
+// servers is given 3, so the stream survives losing one of them. (One test
+// server cannot hold three copies, so this checks the configuration only.)
+func TestStreamReplicas(t *testing.T) {
+	for _, n := range []int{1, 3} {
+		if got := TelemetryStreamConfig(n).Replicas; got != n {
+			t.Errorf("TelemetryStreamConfig(%d).Replicas = %d", n, got)
+		}
 	}
 }
 
 func TestDuplicatesDropped(t *testing.T) {
 	ctx, js := setup(t)
-	s, err := EnsureTelemetryStream(ctx, js)
+	s, err := EnsureTelemetryStream(ctx, js, 1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -82,7 +94,7 @@ func TestDuplicatesDropped(t *testing.T) {
 
 func TestCommandsNotInStream(t *testing.T) {
 	ctx, js := setup(t)
-	if _, err := EnsureTelemetryStream(ctx, js); err != nil {
+	if _, err := EnsureTelemetryStream(ctx, js, 1); err != nil {
 		t.Fatal(err)
 	}
 	_, err := js.Publish(ctx, "command.42", []byte(`{}`))

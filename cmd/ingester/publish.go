@@ -52,7 +52,7 @@ type natsPublisher struct {
 	errors    atomic.Uint64
 }
 
-func newNATSPublisher(ctx context.Context, url string, maxPending int) (*natsPublisher, error) {
+func newNATSPublisher(ctx context.Context, url string, maxPending, replicas int) (*natsPublisher, error) {
 	nc, err := bus.Connect(url, "murmur-ingester")
 	if err != nil {
 		return nil, err
@@ -65,7 +65,7 @@ func newNATSPublisher(ctx context.Context, url string, maxPending int) (*natsPub
 		}),
 	)
 	if err == nil {
-		_, err = bus.EnsureTelemetryStream(ctx, p.js)
+		_, err = bus.EnsureTelemetryStream(ctx, p.js, replicas)
 	}
 	if err != nil {
 		nc.Close()

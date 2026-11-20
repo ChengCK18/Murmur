@@ -98,7 +98,7 @@ func newEnv(t *testing.T) *env {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := bus.EnsureTelemetryStream(ctx, js); err != nil {
+	if _, err := bus.EnsureTelemetryStream(ctx, js, 1); err != nil {
 		t.Fatal(err)
 	}
 	return &env{ctx: ctx, js: js, pool: pool, rdb: rdb}

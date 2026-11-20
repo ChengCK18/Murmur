@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- `-stream-replicas` on the ingester, consumer, gateway and alerter: how many NATS servers keep a copy of the `TELEMETRY` stream (default 1; 3 on a three-server cluster). Give every service the same value.
+
 ## [0.1.0] - 2026-11-10
 
 ### Added

@@ -92,7 +92,7 @@ func TestPublishToJetStream(t *testing.T) {
 	url := natstest.Start(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	p, err := newNATSPublisher(ctx, url, 256)
+	p, err := newNATSPublisher(ctx, url, 256, 1)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -34,17 +34,18 @@ func main() {
 	lowBattery := flag.Int("low-battery", 20, "alert at or below this battery percentage")
 	timeout := flag.Duration("timeout", linkstats.DefaultTimeout, "no heartbeat for this long: link lost")
 	metricsAddr := flag.String("metrics", ":9105", `address to serve Prometheus /metrics on; "" for none`)
+	replicas := flag.Int("stream-replicas", 1, "NATS servers keeping a copy of the telemetry stream; the same for every service")
 	flag.Parse()
 	log.SetFlags(log.Ltime)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	if err := run(ctx, *natsURL, *dbURL, *tenant, *lowBattery, *timeout, *metricsAddr); err != nil {
+	if err := run(ctx, *natsURL, *dbURL, *tenant, *lowBattery, *timeout, *metricsAddr, *replicas); err != nil {
 		log.Fatalf("alerter: %v", err)
 	}
 }
 
-func run(ctx context.Context, natsURL, dbURL string, tenant int64, lowBattery int, timeout time.Duration, metricsAddr string) error {
+func run(ctx context.Context, natsURL, dbURL string, tenant int64, lowBattery int, timeout time.Duration, metricsAddr string, replicas int) error {
 	setup, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 	pool, err := pgxpool.New(setup, dbURL)
@@ -66,7 +67,7 @@ func run(ctx context.Context, natsURL, dbURL string, tenant int64, lowBattery in
 	if err != nil {
 		return err
 	}
-	if _, err := bus.EnsureTelemetryStream(setup, js); err != nil {
+	if _, err := bus.EnsureTelemetryStream(setup, js, replicas); err != nil {
 		return err
 	}
 	// Its own durable, starting from now on first creation: alerts about the

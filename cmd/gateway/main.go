@@ -32,7 +32,7 @@ type config struct {
 	origins                                     []string
 	tenant                                      int64
 	throttle, timeout, stale                    time.Duration
-	maxSubs                                     int
+	maxSubs, replicas                           int
 	commands                                    bool
 	user, password                              string
 	loginHint                                   string
@@ -56,6 +56,7 @@ func main() {
 	flag.BoolVar(&cfg.commands, "commands", true, "accept commands from logged-in browsers")
 	flag.StringVar(&cfg.user, "user", "demo", "the demo login's username")
 	flag.StringVar(&cfg.password, "password", "", `the demo login's password; "" for no logins`)
+	flag.IntVar(&cfg.replicas, "stream-replicas", 1, "NATS servers keeping a copy of the telemetry stream; the same for every service")
 	flag.StringVar(&cfg.loginHint, "login-hint", "", `text shown under the login form, such as a demo's credentials; "" for none`)
 	flag.Parse()
 	log.SetFlags(log.Ltime)
@@ -96,7 +97,7 @@ func run(ctx context.Context, cfg config, ready chan<- string) error {
 	}
 	setup, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	if _, err := bus.EnsureTelemetryStream(setup, js); err != nil {
+	if _, err := bus.EnsureTelemetryStream(setup, js, cfg.replicas); err != nil {
 		return err
 	}
 

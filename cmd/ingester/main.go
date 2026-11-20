@@ -41,11 +41,13 @@ func main() {
 	readBuffer := flag.Int("read-buffer", 4<<20, "UDP socket buffer in bytes; the kernel caps it at net.core.rmem_max")
 	queue := flag.Int("queue", 1<<16, "most packets waiting to be processed")
 	commands := flag.Bool("commands", true, "relay commands to drones; false makes this a telemetry-only ingester")
+	replicas := flag.Int("stream-replicas", 1, "NATS servers keeping a copy of the telemetry stream; the same for every service")
 	flag.Parse()
 	log.SetFlags(0)
 
 	cfg := config{listen: *listen, interval: *interval, timeout: *timeout, natsURL: *natsURL, maxPending: *maxPending,
-		tenant: *tenant, dbURL: *dbURL, metricsAddr: *metricsAddr, readBuffer: *readBuffer, queue: *queue, commands: *commands}
+		tenant: *tenant, dbURL: *dbURL, metricsAddr: *metricsAddr, readBuffer: *readBuffer, queue: *queue, commands: *commands,
+		replicas: *replicas}
 	if err := run(cfg); err != nil {
 		log.Fatalf("ingester: %v", err)
 	}
@@ -61,6 +63,7 @@ type config struct {
 	metricsAddr       string
 	readBuffer, queue int
 	commands          bool
+	replicas          int
 }
 
 func run(cfg config) error {
@@ -102,7 +105,7 @@ func run(cfg config) error {
 
 	if cfg.natsURL != "" {
 		setup, cancel := context.WithTimeout(ctx, 10*time.Second)
-		p, err := newNATSPublisher(setup, cfg.natsURL, cfg.maxPending)
+		p, err := newNATSPublisher(setup, cfg.natsURL, cfg.maxPending, cfg.replicas)
 		cancel()
 		if err != nil {
 			return err

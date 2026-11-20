@@ -36,17 +36,18 @@ func main() {
 	wait := flag.Duration("wait", 100*time.Millisecond, "longest wait to fill a batch")
 	interval := flag.Duration("interval", 5*time.Second, "how often to print progress")
 	metricsAddr := flag.String("metrics", ":9102", `address to serve Prometheus /metrics on; "" for none`)
+	replicas := flag.Int("stream-replicas", 1, "NATS servers keeping a copy of the telemetry stream; the same for every service")
 	flag.Parse()
 	log.SetFlags(log.Ltime)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	if err := run(ctx, *natsURL, *dbURL, *redisAddr, *durable, *batch, *wait, *interval, *metricsAddr); err != nil {
+	if err := run(ctx, *natsURL, *dbURL, *redisAddr, *durable, *batch, *wait, *interval, *metricsAddr, *replicas); err != nil {
 		log.Fatalf("consumer: %v", err)
 	}
 }
 
-func run(ctx context.Context, natsURL, dbURL, redisAddr, durable string, batch int, wait, interval time.Duration, metricsAddr string) error {
+func run(ctx context.Context, natsURL, dbURL, redisAddr, durable string, batch int, wait, interval time.Duration, metricsAddr string, replicas int) error {
 	setup, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
@@ -84,7 +85,7 @@ func run(ctx context.Context, natsURL, dbURL, redisAddr, durable string, batch i
 	if err != nil {
 		return err
 	}
-	if _, err := bus.EnsureTelemetryStream(setup, js); err != nil {
+	if _, err := bus.EnsureTelemetryStream(setup, js, replicas); err != nil {
 		return err
 	}
 	cons, err := js.CreateOrUpdateConsumer(setup, bus.TelemetryStream, consumerConfig(durable, batch))
