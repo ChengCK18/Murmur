@@ -1,0 +1,26 @@
+# A local Kubernetes cluster for Murmur (make kind-up).
+#
+# One control plane and three workers, so the three NATS servers can each run
+# on their own node, as they would on separate machines.
+#
+# The first worker plays the edge node, the one with a public address: the
+# ingester is pinned to it (label murmur.io/edge), and its ports are opened on
+# the host. They are on ports apart from Docker Compose's (8080, 3000, 14560),
+# so both stacks can run at once:
+#   http://localhost:8090   the map (gateway NodePort 30080)
+#   http://localhost:3010   Grafana (NodePort 30300)
+#   udp 127.0.0.1:14570     MAVLink into the ingester (NodePort 30560)
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+name: murmur
+nodes:
+  - role: control-plane
+  - role: worker
+    labels:
+      murmur.io/edge: "true"
+    extraPortMappings:
+      - { containerPort: 30080, hostPort: 8090, listenAddress: 127.0.0.1, protocol: TCP }
+      - { containerPort: 30300, hostPort: 3010, listenAddress: 127.0.0.1, protocol: TCP }
+      - { containerPort: 30560, hostPort: 14570, listenAddress: 127.0.0.1, protocol: UDP }
+  - role: worker
+  - role: worker

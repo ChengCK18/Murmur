@@ -3,7 +3,7 @@
 export GOTOOLCHAIN := local
 COMPOSE := docker compose -f deploy/docker-compose.yml
 
-.PHONY: test itest web-test e2e failures infra up sitl down
+.PHONY: test itest web-test e2e failures infra up sitl down kind-up kind-down
 
 test: ## unit tests; database and Redis tests skip if the infrastructure is not running
 	go test -count=1 ./...
@@ -31,3 +31,15 @@ sitl: ## the whole stack plus 3 SITL drones; the first build compiles ArduPilot
 
 down:
 	$(COMPOSE) --profile sitl down
+
+KIND_CLUSTER := murmur
+IMAGES := ingester consumer commander alerter fakegen gateway
+
+kind-up: ## a local Kubernetes cluster (kind) with Murmur's images built and loaded into it
+	kind get clusters | grep -qx $(KIND_CLUSTER) || kind create cluster --config deploy/k8s/kind.yaml
+	$(COMPOSE) build $(IMAGES)
+	kind load docker-image --name $(KIND_CLUSTER) $(IMAGES:%=murmur/%:dev)
+
+kind-down: ## delete the kind cluster
+	kind delete cluster --name $(KIND_CLUSTER)
+
