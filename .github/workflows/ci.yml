@@ -1,7 +1,8 @@
 # Every push and pull request: the Go tests with real TimescaleDB and Redis
 # (so none skip), the integration tests without SITL, the web app's checks,
-# and a lint of the Compose file and start.sh. The browser tests and SITL need
-# the whole stack and ArduPilot, so they stay local (make e2e, make itest).
+# a lint of the Compose file and the shell scripts, and the whole platform on
+# a kind cluster with a smoke test. The browser tests and SITL need the whole
+# stack and ArduPilot, so they stay local (make e2e, make itest).
 name: CI
 
 on:
@@ -79,4 +80,31 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - run: docker compose -f deploy/docker-compose.yml --profile sitl config -q
-      - run: shellcheck start.sh
+      - run: shellcheck start.sh deploy/k8s/*.sh
+
+  kubernetes:
+    name: Kubernetes (kind)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+      - uses: azure/setup-helm@v4
+        with: { version: v4.3.2 }
+      - uses: helm/kind-action@v1
+        with: { version: v0.33.0, kubectl_version: v1.37.2, install_only: true }
+      - run: python3 -c 'import yaml' 2>/dev/null || sudo apt-get install -y python3-yaml
+      - run: helm lint deploy/k8s/murmur
+      - run: make k8s-rules-test
+      # The same steps as on a laptop: the four-node cluster with the images
+      # loaded, then monitoring, KEDA and Murmur, then the checks.
+      - run: make kind-up
+      - run: make k8s-up
+      - run: make k8s-smoke
+      - name: Cluster state on failure
+        if: failure()
+        run: |
+          kubectl --context kind-murmur get nodes,pods -A -o wide || true
+          kubectl --context kind-murmur get events -A --sort-by=.lastTimestamp | tail -50 || true
+          for p in $(kubectl --context kind-murmur -n murmur get pods -o name); do
+            echo "--- $p"; kubectl --context kind-murmur -n murmur logs "$p" --all-containers --tail=30 || true
+          done
