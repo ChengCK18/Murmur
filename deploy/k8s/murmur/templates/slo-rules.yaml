@@ -1,0 +1,117 @@
+{{- /*
+Murmur's service-level objectives, and alerts on how fast each burns its
+error budget (the multiwindow, multi-burn-rate alerts of Google's SRE
+workbook, chapter 5). Over 30 days:
+
+  freshness  99% of telemetry is stored within 1 s of the ingester
+             receiving it (receive_to_commit; 1 s is the 1.024 s bucket)
+  delivery   99.9% of packets the ingester receives reach the stream: not
+             dropped from its queue, nor refused by NATS. Packets lost on the
+             radio link before they arrive are the drones' loss, not the
+             platform's, and are counted elsewhere (frames_lost).
+
+A burn rate of 1 spends the budget in exactly 30 days; 14.4 spends 2% of it
+in an hour. Each alert needs a long window, so a short blip does not page,
+and a short one, so the alert stops soon after the problem does:
+
+  page    14.4 over 1 h and 5 m      2% of the budget in an hour
+  page     6   over 6 h and 30 m     5% in six hours
+  ticket   3   over 1 d and 2 h      10% in a day
+
+(The workbook's slowest alert, 1 over 3 days, is left out: Prometheus here
+keeps 24 hours.) Two plain alerts cover what the objectives cannot see: a
+consumer that is down stores nothing, so it records no slow commits either.
+*/ -}}
+{{- if .Capabilities.APIVersions.Has "monitoring.coreos.com/v1/PrometheusRule" }}
+{{- $windows := list "5m" "30m" "1h" "2h" "6h" "1d" }}
+{{- $alerts := list
+  (dict "severity" "page" "burn" "14.4" "long" "1h" "short" "5m")
+  (dict "severity" "page" "burn" "6" "long" "6h" "short" "30m")
+  (dict "severity" "ticket" "burn" "3" "long" "1d" "short" "2h") }}
+{{- $slos := list
+  (dict "name" "freshness" "objective" .Values.slo.freshness "title" "MurmurFreshnessBudgetBurn"
+        "summary" "Telemetry is reaching the database later than 1 s too often")
+  (dict "name" "delivery" "objective" .Values.slo.delivery "title" "MurmurDeliveryBudgetBurn"
+        "summary" "The ingester is losing received packets before they reach the stream") }}
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: murmur-slo
+  labels:
+    {{- include "murmur.labels" . | nindent 4 }}
+spec:
+  groups:
+    # The share of bad events over each window, recorded once so the
+    # alerts below read a series instead of recomputing it.
+    - name: murmur-slo-errors
+      rules:
+        {{- range $w := $windows }}
+        - record: murmur:slo_freshness_errors:ratio_rate{{ $w }}
+          expr: |
+            1 - (
+              sum(rate(murmur_consumer_receive_to_commit_seconds_bucket{le="1.024"}[{{ $w }}]))
+              /
+              sum(rate(murmur_consumer_receive_to_commit_seconds_count[{{ $w }}]))
+            )
+        - record: murmur:slo_delivery_errors:ratio_rate{{ $w }}
+          expr: |
+            (
+              sum(rate(murmur_ingester_queue_dropped_total[{{ $w }}]))
+              + sum(rate(murmur_ingester_publish_errors_total[{{ $w }}]))
+            )
+            /
+            sum(rate(murmur_ingester_packets_total[{{ $w }}]))
+        {{- end }}
+
+    - name: murmur-slo-alerts
+      rules:
+        {{- range $s := $slos }}
+        {{- $budget := printf "%.4g" (subf 1.0 (float64 $s.objective)) }}
+        {{- range $a := $alerts }}
+        - alert: {{ $s.title }}
+          expr: |
+            murmur:slo_{{ $s.name }}_errors:ratio_rate{{ $a.long }} > ({{ $a.burn }} * {{ $budget }})
+            and
+            murmur:slo_{{ $s.name }}_errors:ratio_rate{{ $a.short }} > ({{ $a.burn }} * {{ $budget }})
+          labels:
+            severity: {{ $a.severity }}
+            slo: {{ $s.name }}
+          annotations:
+            summary: {{ $s.summary | quote }}
+            description: >-
+              Error budget burning {{ $a.burn }}x too fast over the last {{ $a.long }}
+              (and {{ $a.short }}): {{ "{{" }} $value | humanizePercentage {{ "}}" }} of events bad,
+              against {{ printf "%.4g" (mulf 100 (float64 $budget)) }}% allowed.
+        {{- end }}
+        {{- end }}
+
+    - name: murmur-health
+      rules:
+        # A consumer that stores nothing records no slow commits, so the
+        # freshness objective cannot see it stopping; the backlog can.
+        # Messages leave the stream after 10 minutes, so 5 minutes' worth
+        # waiting is halfway to losing data.
+        - alert: MurmurBacklogNearRetention
+          expr: |
+            max(murmur_consumer_lag)
+              > 300 * sum(rate(murmur_ingester_published_total[5m]))
+            and max(murmur_consumer_lag) > 1000
+          for: 2m
+          labels:
+            severity: page
+          annotations:
+            summary: "The consumer is more than 5 minutes behind; the stream keeps 10"
+            description: >-
+              {{ "{{" }} $value {{ "}}" }} messages wait for db-writer. At 10 minutes old they
+              leave the stream unstored.
+        - alert: MurmurTargetDown
+          expr: up{namespace="{{ .Release.Namespace }}"} == 0
+          for: 2m
+          labels:
+            severity: page
+          annotations:
+            summary: "Prometheus cannot scrape {{ "{{" }} $labels.pod {{ "}}" }}"
+            description: >-
+              {{ "{{" }} $labels.job {{ "}}" }} on {{ "{{" }} $labels.pod {{ "}}" }} has not answered
+              /metrics for 2 minutes.
+{{- end }}

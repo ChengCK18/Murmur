@@ -129,7 +129,7 @@ This is a working prototype, tested with simulated and SITL drones, not with rea
 - **Security on the drone link.** MAVLink here is unsigned and unencrypted, and a drone is identified by its source address, which a mobile network can change mid-flight. The fix is MAVLink 2 signing plus a VPN such as WireGuard, which gives each drone a fixed, private address.
 - **A ground-station heartbeat.** The ingester never sends one, so ArduPilot's GCS failsafe cannot tell when the platform has gone.
 - **Real users.** One demo login set by flags, no limit on login attempts, and no TLS of its own: it belongs behind a reverse proxy with HTTPS.
-- **Telling people.** Drone alerts show only on the map, and Prometheus has no alert rules yet. Next: service-level objectives such as "99% of messages stored within 1 s", with burn-rate alerts.
+- **Telling people.** Drone alerts show only on the map. On Kubernetes, Prometheus alerts on two service-level objectives (99% of telemetry stored within 1 s, 99.9% of received packets delivered to the stream) by how fast they burn their error budget, but Alertmanager has no receiver yet, so nobody is notified; the Compose stack has no alert rules.
 - **Two known edge cases.** A drone's late answer to a command can be credited to a resend of the same command type, and an alerter far behind the stream could raise link-lost alerts from old data.
 - **ArduCopter only.** The flight-mode numbers are ArduPilot's; PX4 needs its own mapping.
 

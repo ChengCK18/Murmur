@@ -1,0 +1,125 @@
+# promtool unit tests for deploy/k8s/murmur/templates/slo-rules.yaml
+# (make k8s-rules-test). Counters rise once a minute; "0+1000x120" is 0, 1000,
+# 2000, ... for two hours. Each case says which alerts fire, and every other
+# alert of the same name must not.
+rule_files: [slo-rules.yaml]
+evaluation_interval: 1m
+
+tests:
+  # Healthy: 1% of commits slower than 1 s, exactly the budget, and nothing
+  # dropped. Spending the budget at the rate it allows must not alert.
+  - interval: 1m
+    input_series:
+      - series: murmur_consumer_receive_to_commit_seconds_count
+        values: 0+1000x120
+      - series: murmur_consumer_receive_to_commit_seconds_bucket{le="1.024"}
+        values: 0+990x120
+      - series: murmur_ingester_packets_total
+        values: 0+1000x120
+      - series: murmur_ingester_queue_dropped_total
+        values: 0+0x120
+      - series: murmur_ingester_publish_errors_total
+        values: 0+0x120
+    alert_rule_test:
+      - { eval_time: 60m, alertname: MurmurFreshnessBudgetBurn, exp_alerts: [] }
+      - { eval_time: 60m, alertname: MurmurDeliveryBudgetBurn, exp_alerts: [] }
+
+  # An outage: for an hour, 20% of commits are late and 2% of packets are
+  # dropped. Both burn far faster than 14.4x, so every window agrees: both
+  # pages and the ticket.
+  - interval: 1m
+    input_series:
+      - series: murmur_consumer_receive_to_commit_seconds_count
+        values: 0+1000x120
+      - series: murmur_consumer_receive_to_commit_seconds_bucket{le="1.024"}
+        values: 0+800x120
+      - series: murmur_ingester_packets_total
+        values: 0+1000x120
+      - series: murmur_ingester_queue_dropped_total
+        values: 0+20x120
+      - series: murmur_ingester_publish_errors_total
+        values: 0+0x120
+    alert_rule_test:
+      - eval_time: 60m
+        alertname: MurmurFreshnessBudgetBurn
+        exp_alerts:
+          - exp_labels: { severity: page, slo: freshness }
+            exp_annotations:
+              summary: Telemetry is reaching the database later than 1 s too often
+              description: "Error budget burning 14.4x too fast over the last 1h (and 5m): 20% of events bad, against 1% allowed."
+          - exp_labels: { severity: page, slo: freshness }
+            exp_annotations:
+              summary: Telemetry is reaching the database later than 1 s too often
+              description: "Error budget burning 6x too fast over the last 6h (and 30m): 20% of events bad, against 1% allowed."
+          - exp_labels: { severity: ticket, slo: freshness }
+            exp_annotations:
+              summary: Telemetry is reaching the database later than 1 s too often
+              description: "Error budget burning 3x too fast over the last 1d (and 2h): 20% of events bad, against 1% allowed."
+      - eval_time: 60m
+        alertname: MurmurDeliveryBudgetBurn
+        exp_alerts:
+          - exp_labels: { severity: page, slo: delivery }
+            exp_annotations:
+              summary: The ingester is losing received packets before they reach the stream
+              description: "Error budget burning 14.4x too fast over the last 1h (and 5m): 2% of events bad, against 0.1% allowed."
+          - exp_labels: { severity: page, slo: delivery }
+            exp_annotations:
+              summary: The ingester is losing received packets before they reach the stream
+              description: "Error budget burning 6x too fast over the last 6h (and 30m): 2% of events bad, against 0.1% allowed."
+          - exp_labels: { severity: ticket, slo: delivery }
+            exp_annotations:
+              summary: The ingester is losing received packets before they reach the stream
+              description: "Error budget burning 3x too fast over the last 1d (and 2h): 2% of events bad, against 0.1% allowed."
+
+  # A blip: every commit late, but for 2 minutes of the hour. The 5-minute
+  # window is all bad, the hour only 3.3%: no page, which is the point of
+  # the long window; the day's 3x ticket still notes it.
+  - interval: 1m
+    input_series:
+      - series: murmur_consumer_receive_to_commit_seconds_count
+        values: 0+1000x60
+      - series: murmur_consumer_receive_to_commit_seconds_bucket{le="1.024"}
+        values: 0+1000x58 58000 58000
+    alert_rule_test:
+      - eval_time: 60m
+        alertname: MurmurFreshnessBudgetBurn
+        exp_alerts:
+          - exp_labels: { severity: ticket, slo: freshness }
+            exp_annotations:
+              summary: Telemetry is reaching the database later than 1 s too often
+              description: "Error budget burning 3x too fast over the last 1d (and 2h): 3.333% of events bad, against 1% allowed."
+
+  # The consumer stops: no commits, so the freshness objective sees nothing,
+  # but the backlog grows past 5 minutes of traffic (10 messages a second).
+  - interval: 1m
+    input_series:
+      - series: murmur_ingester_published_total
+        values: 0+600x20
+      - series: murmur_consumer_lag{pod="consumer-a"}
+        values: 0+600x20
+      - series: murmur_consumer_lag{pod="consumer-b"}
+        values: 0+600x20
+    alert_rule_test:
+      - { eval_time: 6m, alertname: MurmurBacklogNearRetention, exp_alerts: [] }
+      - eval_time: 9m
+        alertname: MurmurBacklogNearRetention
+        exp_alerts:
+          - exp_labels: { severity: page }
+            exp_annotations:
+              summary: The consumer is more than 5 minutes behind; the stream keeps 10
+              description: "5400 messages wait for db-writer. At 10 minutes old they leave the stream unstored."
+
+  # A pod that stops answering /metrics.
+  - interval: 1m
+    input_series:
+      - series: up{namespace="murmur", job="consumer", pod="consumer-a"}
+        values: 1 1 0 0 0 0
+    alert_rule_test:
+      - { eval_time: 3m, alertname: MurmurTargetDown, exp_alerts: [] }
+      - eval_time: 5m
+        alertname: MurmurTargetDown
+        exp_alerts:
+          - exp_labels: { severity: page, namespace: murmur, job: consumer, pod: consumer-a }
+            exp_annotations:
+              summary: Prometheus cannot scrape consumer-a
+              description: "consumer on consumer-a has not answered /metrics for 2 minutes."

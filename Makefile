@@ -3,7 +3,7 @@
 export GOTOOLCHAIN := local
 COMPOSE := docker compose -f deploy/docker-compose.yml
 
-.PHONY: test itest web-test e2e failures infra up sitl down kind-up kind-down k8s-up k8s-down
+.PHONY: test itest web-test e2e failures infra up sitl down kind-up kind-down k8s-up k8s-down k8s-rules-test
 
 test: ## unit tests; database and Redis tests skip if the infrastructure is not running
 	go test -count=1 ./...
@@ -63,3 +63,6 @@ k8s-down: ## uninstall Murmur, KEDA and monitoring; the NATS and database volume
 	$(KUBECTL) delete configmap murmur-dashboards --namespace monitoring --ignore-not-found
 	$(HELM) uninstall keda --namespace keda --wait
 	$(HELM) uninstall monitoring --namespace monitoring --wait
+
+k8s-rules-test: ## unit tests for the chart's alert rules, with promtool in Docker; no cluster needed
+	deploy/k8s/test-rules.sh

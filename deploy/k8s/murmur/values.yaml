@@ -88,3 +88,9 @@ fakegen:
   resources:
     requests: { cpu: 25m, memory: 16Mi }
     limits: { memory: 64Mi }
+
+# Service-level objectives and their alerts (templates/slo-rules.yaml), for
+# Prometheus from kube-prometheus-stack. Objectives are over 30 days.
+slo:
+  freshness: 0.99 # stored in the database within 1 s of the ingester receiving it
+  delivery: 0.999 # packets received by the ingester that reach the stream
