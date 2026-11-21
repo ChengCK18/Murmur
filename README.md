@@ -42,14 +42,15 @@ The script is a wrapper around `docker compose -f deploy/docker-compose.yml`. To
 
 ### On Kubernetes
 
-A local cluster with [kind](https://kind.sigs.k8s.io/): one control plane and three workers, with three NATS servers keeping three copies of the stream, two consumers and two gateways. You also need kind, kubectl and Helm.
+A local cluster with [kind](https://kind.sigs.k8s.io/): one control plane and three workers, with three NATS servers keeping three copies of the stream, the consumer autoscaled from 2 to 6 copies on its backlog, two gateways, and alerts on two service-level objectives. You also need kind, kubectl and Helm.
 
 ```sh
 make kind-up    # creates the cluster and loads the images; again after code changes
-make k8s-up     # installs the Helm chart in deploy/k8s/murmur
+make k8s-up     # installs monitoring, KEDA and the Helm chart in deploy/k8s/murmur
+make k8s-smoke  # checks it end to end, as CI does
 ```
 
-The map is on http://localhost:8090, Grafana with Murmur's dashboards and the cluster's on http://localhost:3010, and the cluster takes MAVLink on UDP 127.0.0.1:14570, ports apart from Compose's so both can run at once. `make k8s-down` removes the chart and `make kind-down` the cluster.
+The map is on http://localhost:8090, Grafana with Murmur's dashboards and the cluster's on http://localhost:3010, and the cluster takes MAVLink on UDP 127.0.0.1:14570, ports apart from Compose's so both can run at once. `make k8s-down` removes the chart and `make kind-down` the cluster. [docs/kubernetes.md](docs/kubernetes.md) explains what runs where, what scales and why, the autoscaling and the alerts.
 
 ## Architecture
 
