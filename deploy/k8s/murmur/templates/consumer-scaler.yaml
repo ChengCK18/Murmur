@@ -1,0 +1,44 @@
+{{- /*
+KEDA scales the consumer on the TELEMETRY stream's backlog for db-writer:
+messages waiting plus delivered but unacknowledged, read from NATS's
+monitoring port. It keeps about lagThreshold messages of backlog per copy,
+so 4,500 waiting asks for 5 copies, within minReplicas and maxReplicas.
+
+The HPA KEDA creates asks for the backlog every 15 s (KEDA's own
+pollingInterval only matters when scaling to and from zero). KEDA asks any
+NATS server first, then finds the server leading db-writer through
+the addresses the servers advertise (their pod IPs) and asks that one.
+
+More copies help until the database is the limit: each copy wrote 13,000 to
+14,000 rows a second in the load tests, with TimescaleDB under half busy.
+*/ -}}
+{{- if include "murmur.consumerAutoscaled" . }}
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: consumer
+  labels:
+    {{- include "murmur.labels" . | nindent 4 }}
+spec:
+  scaleTargetRef:
+    name: consumer
+  minReplicaCount: {{ .Values.consumer.autoscaling.minReplicas }}
+  maxReplicaCount: {{ .Values.consumer.autoscaling.maxReplicas }}
+  advanced:
+    horizontalPodAutoscalerConfig:
+      behavior:
+        # Grow at once; shrink only after a minute of low backlog, so a
+        # backlog that has just drained does not take copies away mid-burst.
+        scaleUp:
+          stabilizationWindowSeconds: 0
+        scaleDown:
+          stabilizationWindowSeconds: 60
+  triggers:
+    - type: nats-jetstream
+      metadata:
+        natsServerMonitoringEndpoint: nats-headless.{{ .Release.Namespace }}.svc.cluster.local:8222
+        account: "$G" # the default account; KEDA needs it named
+        stream: TELEMETRY
+        consumer: db-writer
+        lagThreshold: {{ .Values.consumer.autoscaling.lagThreshold | quote }}
+{{- end }}

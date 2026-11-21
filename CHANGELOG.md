@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - Kubernetes: `make kind-up` creates a local kind cluster of three workers and `make k8s-up` installs the Helm chart in `deploy/k8s/murmur`: three NATS servers with the stream kept on each, TimescaleDB, Redis, the ingester on the edge node taking MAVLink on UDP 14570, two consumers, two gateways serving the map on http://localhost:8090, the commander, the alerter and 10 fake drones.
 - Monitoring on Kubernetes: `make k8s-up` also installs kube-prometheus-stack, which scrapes every Murmur pod through a ServiceMonitor, and serves Grafana with Murmur's dashboards and the cluster's own on http://localhost:3010.
+- Autoscaling on Kubernetes: `make k8s-up` installs KEDA, which scales the consumer between 2 and 6 copies on the `db-writer` backlog in JetStream, about one copy per 1,000 waiting messages (`consumer.autoscaling` in the chart's values).
 - `-stream-replicas` on the ingester, consumer, gateway and alerter: how many NATS servers keep a copy of the `TELEMETRY` stream (default 1; 3 on a three-server cluster). Give every service the same value.
 
 ## [0.1.0] - 2026-11-10

@@ -2,7 +2,7 @@
 The consumer: the service that scales out. Every copy pulls from the same
 durable consumer (db-writer), so NATS gives each message to one of them, and
 a message redelivered after a crash is dropped by the insert's ON CONFLICT.
-Step 5 hands the replica count to KEDA, which follows the stream's backlog.
+With KEDA, the replica count is left out here and set by consumer-scaler.yaml.
 */ -}}
 apiVersion: v1
 kind: Service
@@ -24,7 +24,9 @@ metadata:
   labels:
     {{- include "murmur.labels" . | nindent 4 }}
 spec:
+  {{- if not (include "murmur.consumerAutoscaled" .) }}
   replicas: {{ .Values.consumer.replicas }}
+  {{- end }}
   selector:
     matchLabels:
       app.kubernetes.io/name: consumer

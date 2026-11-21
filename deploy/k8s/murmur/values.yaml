@@ -48,6 +48,15 @@ ingester:
 consumer:
   replicas: 2 # they share one durable consumer, so each message goes to one
   batch: 500
+  # With KEDA in the cluster, the replica count follows the stream's backlog
+  # instead: lag (messages waiting plus delivered but unacknowledged) divided
+  # by lagThreshold, between minReplicas and maxReplicas. Without KEDA, or
+  # with enabled: false, replicas above applies.
+  autoscaling:
+    enabled: true
+    minReplicas: 2 # two, so losing a node never leaves the stream unread
+    maxReplicas: 6 # past this the database, not the consumer, is the limit
+    lagThreshold: 1000 # messages of backlog per consumer
   resources:
     requests: { cpu: 100m, memory: 64Mi }
     limits: { memory: 256Mi }

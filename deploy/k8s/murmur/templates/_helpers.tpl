@@ -40,3 +40,10 @@ readinessProbe:
   httpGet: { path: /metrics, port: metrics }
   periodSeconds: 5
 {{- end }}
+
+{{/* "true" when KEDA scales the consumer: autoscaling is on and the cluster has KEDA. */}}
+{{- define "murmur.consumerAutoscaled" -}}
+{{- if and .Values.consumer.autoscaling.enabled (.Capabilities.APIVersions.Has "keda.sh/v1alpha1/ScaledObject") -}}
+true
+{{- end -}}
+{{- end }}

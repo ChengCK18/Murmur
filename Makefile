@@ -48,15 +48,18 @@ HELM := helm $(KUBE)
 KUBECTL := kubectl --context kind-$(KIND_CLUSTER)
 MONITORING_CHART := oci://ghcr.io/prometheus-community/charts/kube-prometheus-stack
 MONITORING_VERSION := 92.22.0
+KEDA_CHART := https://kedacore.github.io/charts/keda-2.21.0.tgz
 
-k8s-up: ## install or upgrade monitoring and Murmur's chart on the kind cluster (make kind-up first)
+k8s-up: ## install or upgrade monitoring, KEDA and Murmur's chart on the kind cluster (make kind-up first)
 	$(HELM) upgrade --install monitoring $(MONITORING_CHART) --version $(MONITORING_VERSION) \
 		--namespace monitoring --create-namespace -f deploy/k8s/monitoring-values.yaml --wait --timeout 10m
+	$(HELM) upgrade --install keda $(KEDA_CHART) --namespace keda --create-namespace --wait --timeout 5m
 	$(KUBECTL) create configmap murmur-dashboards --namespace monitoring --from-file=deploy/grafana/dashboards \
 		--dry-run=client -o yaml | $(KUBECTL) label --local -f - grafana_dashboard=1 -o yaml | $(KUBECTL) apply -f -
-	$(HELM) upgrade --install murmur deploy/k8s/murmur --namespace murmur --create-namespace --wait --timeout 5m
+	$(HELM) upgrade --install murmur deploy/k8s/murmur --namespace murmur --create-namespace --reset-values --wait --timeout 5m
 
-k8s-down: ## uninstall Murmur and monitoring; the NATS and database volumes are kept
+k8s-down: ## uninstall Murmur, KEDA and monitoring; the NATS and database volumes are kept
 	$(HELM) uninstall murmur --namespace murmur --wait
 	$(KUBECTL) delete configmap murmur-dashboards --namespace monitoring --ignore-not-found
+	$(HELM) uninstall keda --namespace keda --wait
 	$(HELM) uninstall monitoring --namespace monitoring --wait
