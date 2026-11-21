@@ -49,7 +49,7 @@ make kind-up    # creates the cluster and loads the images; again after code cha
 make k8s-up     # installs the Helm chart in deploy/k8s/murmur
 ```
 
-The map is on http://localhost:8090 and the cluster takes MAVLink on UDP 127.0.0.1:14570, ports apart from Compose's so both can run at once. `make k8s-down` removes the chart and `make kind-down` the cluster.
+The map is on http://localhost:8090, Grafana with Murmur's dashboards and the cluster's on http://localhost:3010, and the cluster takes MAVLink on UDP 127.0.0.1:14570, ports apart from Compose's so both can run at once. `make k8s-down` removes the chart and `make kind-down` the cluster.
 
 ## Architecture
 

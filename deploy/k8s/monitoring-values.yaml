@@ -1,0 +1,72 @@
+# Settings for kube-prometheus-stack on the kind cluster (make k8s-up):
+# Prometheus, Grafana, Alertmanager, node-exporter and kube-state-metrics,
+# installed as the release "monitoring" in the namespace of the same name.
+# The passwords are local defaults, as in deploy/docker-compose.yml.
+
+# kind runs the control plane's etcd, scheduler, controller manager and
+# kube-proxy listening on localhost only, so Prometheus cannot reach them:
+# leave them out, or their targets show as down and their alerts fire for ever.
+kubeEtcd: { enabled: false }
+kubeScheduler: { enabled: false }
+kubeControllerManager: { enabled: false }
+kubeProxy: { enabled: false }
+defaultRules:
+  rules:
+    etcd: false
+    kubeSchedulerAlerting: false
+    kubeSchedulerRecording: false
+    kubeControllerManager: false
+    kubeProxy: false
+
+prometheus:
+  prometheusSpec:
+    # Find ServiceMonitors and rules from every release, not only this one:
+    # Murmur's chart brings its own.
+    serviceMonitorSelectorNilUsesHelmValues: false
+    podMonitorSelectorNilUsesHelmValues: false
+    ruleSelectorNilUsesHelmValues: false
+    retention: 24h
+    resources:
+      requests: { cpu: 100m, memory: 256Mi }
+      limits: { memory: 1Gi }
+
+alertmanager:
+  alertmanagerSpec:
+    resources:
+      requests: { cpu: 10m, memory: 32Mi }
+      limits: { memory: 128Mi }
+
+grafana:
+  adminPassword: murmur
+  service:
+    type: NodePort
+    nodePort: 30300 # http://localhost:3010 on the host (deploy/k8s/kind.yaml)
+  grafana.ini:
+    auth.anonymous: # dashboards readable without logging in, as in Compose
+      enabled: true
+      org_role: Viewer
+    dashboards:
+      # The sidecar writes each dashboard ConfigMap's files here.
+      default_home_dashboard_path: /tmp/dashboards/pipeline.json
+    analytics:
+      reporting_enabled: false
+      check_for_updates: false
+  # Murmur's dashboards also read TimescaleDB; their queries name the data
+  # sources by uid, which match deploy/grafana/provisioning. The chart's own
+  # Prometheus data source already has the uid "prometheus".
+  additionalDataSources:
+    - name: TimescaleDB
+      uid: timescaledb
+      type: grafana-postgresql-datasource
+      url: timescaledb.murmur.svc:5432
+      user: murmur
+      jsonData:
+        database: murmur
+        sslmode: disable
+        timescaledb: true
+        postgresVersion: 1700
+      secureJsonData:
+        password: murmur
+  resources:
+    requests: { cpu: 50m, memory: 128Mi }
+    limits: { memory: 512Mi }

@@ -43,10 +43,20 @@ kind-up: ## a local Kubernetes cluster (kind) with Murmur's images built and loa
 kind-down: ## delete the kind cluster
 	kind delete cluster --name $(KIND_CLUSTER)
 
-HELM := helm --kube-context kind-$(KIND_CLUSTER) --namespace murmur
+KUBE := --kube-context kind-$(KIND_CLUSTER)
+HELM := helm $(KUBE)
+KUBECTL := kubectl --context kind-$(KIND_CLUSTER)
+MONITORING_CHART := oci://ghcr.io/prometheus-community/charts/kube-prometheus-stack
+MONITORING_VERSION := 92.22.0
 
-k8s-up: ## install or upgrade Murmur's chart on the kind cluster (make kind-up first)
-	$(HELM) upgrade --install murmur deploy/k8s/murmur --create-namespace --wait --timeout 5m
+k8s-up: ## install or upgrade monitoring and Murmur's chart on the kind cluster (make kind-up first)
+	$(HELM) upgrade --install monitoring $(MONITORING_CHART) --version $(MONITORING_VERSION) \
+		--namespace monitoring --create-namespace -f deploy/k8s/monitoring-values.yaml --wait --timeout 10m
+	$(KUBECTL) create configmap murmur-dashboards --namespace monitoring --from-file=deploy/grafana/dashboards \
+		--dry-run=client -o yaml | $(KUBECTL) label --local -f - grafana_dashboard=1 -o yaml | $(KUBECTL) apply -f -
+	$(HELM) upgrade --install murmur deploy/k8s/murmur --namespace murmur --create-namespace --wait --timeout 5m
 
-k8s-down: ## uninstall the chart; the NATS and database volumes are kept
-	$(HELM) uninstall murmur --wait
+k8s-down: ## uninstall Murmur and monitoring; the NATS and database volumes are kept
+	$(HELM) uninstall murmur --namespace murmur --wait
+	$(KUBECTL) delete configmap murmur-dashboards --namespace monitoring --ignore-not-found
+	$(HELM) uninstall monitoring --namespace monitoring --wait

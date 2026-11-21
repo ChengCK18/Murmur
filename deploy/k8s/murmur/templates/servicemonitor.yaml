@@ -1,0 +1,25 @@
+{{- /*
+Tells Prometheus (the Prometheus Operator, from kube-prometheus-stack) to
+scrape every Murmur Service with a port named "metrics": the ingester,
+consumer, gateway, commander and alerter. Each pod behind a Service is
+scraped on its own, so the two consumers show as two targets. The job label
+is the Service's name, as in deploy/prometheus/prometheus.yml.
+
+Only rendered when the cluster knows ServiceMonitors, so the chart still
+installs without monitoring.
+*/ -}}
+{{- if .Capabilities.APIVersions.Has "monitoring.coreos.com/v1/ServiceMonitor" }}
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: murmur
+  labels:
+    {{- include "murmur.labels" . | nindent 4 }}
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/part-of: murmur
+  endpoints:
+    - port: metrics
+      interval: 5s # as in Compose; the dashboards assume it
+{{- end }}
