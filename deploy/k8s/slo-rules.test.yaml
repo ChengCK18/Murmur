@@ -4,6 +4,11 @@
 # alert of the same name must not.
 rule_files: [slo-rules.yaml]
 evaluation_interval: 1m
+# Record the ratios before the alerts read them at each step. Without an
+# order promtool evaluates groups at random, and an alert evaluated first
+# reads the ratio recorded a minute earlier (live Prometheus does the same,
+# a step behind, which is harmless there but makes a test flaky).
+group_eval_order: [murmur-slo-errors, murmur-slo-alerts, murmur-health]
 
 tests:
   # Healthy: 1% of commits slower than 1 s, exactly the budget, and nothing
