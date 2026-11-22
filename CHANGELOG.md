@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-11-22
+
 ### Added
 - Kubernetes: `make kind-up` creates a local kind cluster of three workers and `make k8s-up` installs the Helm chart in `deploy/k8s/murmur`: three NATS servers with the stream kept on each, TimescaleDB, Redis, the ingester on the edge node taking MAVLink on UDP 14570, two consumers, two gateways serving the map on http://localhost:8090, the commander, the alerter and 10 fake drones.
 - Monitoring on Kubernetes: `make k8s-up` also installs kube-prometheus-stack, which scrapes every Murmur pod through a ServiceMonitor, and serves Grafana with Murmur's dashboards and the cluster's own on http://localhost:3010.
@@ -74,5 +76,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The gateway answers a missing script or stylesheet with 404 instead of the app's page.
 - The ingester no longer crashes on its first report when the `drones` table holds a drone that has not sent anything since the ingester started.
 
-[Unreleased]: https://github.com/ChengCK18/Murmur/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/ChengCK18/Murmur/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/ChengCK18/Murmur/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/ChengCK18/Murmur/releases/tag/v0.1.0
